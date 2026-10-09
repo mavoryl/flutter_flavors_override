@@ -307,6 +307,101 @@ void main() {
     });
   });
 
+  group('only a comment line is a marker', () {
+    const scalarMarker = 'notes: |\n'
+        '  # flutter_flavor_overrides: core\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n';
+
+    test('a marker-like line in a block scalar owns nothing', () {
+      expect(merge(scalarMarker, {}), same(scalarMarker));
+    });
+
+    test('so a desired package there is a foreign conflict', () {
+      expect(
+        () => merge(scalarMarker, {'core': '1.0.0'}),
+        throwsA(isA<FlavorOverridesException>()),
+      );
+    });
+  });
+
+  group('foreign comments survive', () {
+    test('a comment-only file comes back byte for byte', () {
+      const commented = '# dependency_overrides:\n'
+          '#   foo:\n'
+          '#     path: ../foo\n';
+      const withProbe = '$commented$probeFile';
+
+      expect(merge(commented, probe), withProbe);
+      expect(merge(withProbe, probe), withProbe);
+      expect(merge(withProbe, {}), commented);
+    });
+
+    test('a comment after the foreign entries, ours inserted before it', () {
+      const foreign = 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '# trailing note\n';
+      const withProbe = '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          '# trailing note\n';
+
+      expect(merge(foreign, probe), withProbe);
+      expect(merge(withProbe, probe), withProbe);
+      expect(merge(withProbe, {}), foreign);
+    });
+
+    test('a comment added after our entries in our file', () {
+      const annotated = '$probeFile# my note\n';
+
+      expect(merge(annotated, probe), annotated);
+      expect(merge(annotated, {}), '# my note\n');
+    });
+
+    test('a comment between foreign entries and ours', () {
+      const foreign = 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  # zz: commented out\n'
+          '  zz: 1.0.0\n';
+
+      final added = merge(foreign, {'other': '2.0.0'});
+      expect(added, contains('  # zz: commented out\n'));
+      expect(merge(added, {'other': '2.0.0'}), added);
+      expect(merge(added, {}), foreign);
+    });
+  });
+
+  group('an empty dependency_overrides section', () {
+    test('is no content: the pubspec overrides are copied, block style', () {
+      const empty = 'dependency_overrides: {}\n';
+      const expected = '# flutter_flavor_overrides: ffo_probe,other\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          '  other: 1.0.0\n';
+
+      final first = merge(empty, probe, pubspecOverrides: {'other': '1.0.0'});
+      expect(first, expected);
+      expect(merge(first, probe, pubspecOverrides: {'other': '1.0.0'}), first);
+    });
+
+    test('a flow section with foreign entries stays flow and comes back', () {
+      const flow = 'dependency_overrides: {core: {path: ../core}}\n';
+
+      final added = merge(flow, probe);
+      expect(added, startsWith('# flutter_flavor_overrides: ffo_probe\n'));
+      expect(added, contains('ffo_probe'));
+      expect(merge(added, probe), added);
+      expect(merge(added, {}), flow);
+    });
+  });
+
   group('errors name the file', () {
     Matcher throwsAbout(String detail) => throwsA(
           isA<FlavorOverridesException>().having(

@@ -29,3 +29,6 @@ pubspec.lock
 # Consumers get the package, not our test suite: pana awards nothing for shipping
 # tests. Root-anchored on purpose.
 /test/
+
+# End-to-end fixtures: Flutter apps, a test plugin and its stub. Root-anchored.
+/e2e/

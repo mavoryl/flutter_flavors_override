@@ -1,0 +1,13 @@
+name: ffo_probe
+description: >-
+  No-op stub of the ffo_probe test plugin: the same name and Dart API, no
+  `flutter: plugin:` section, so no native code.
+version: 0.0.1
+publish_to: none
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter

@@ -1,0 +1,10 @@
+# Overrides files are generated (by the CLI, or by tool/verify.sh in a temporary
+# copy). Only the hand-written golden files under expected/ are tracked.
+pubspec_overrides.yaml
+!**/expected/**/pubspec_overrides.yaml
+
+# Build and pub output of the fixtures.
+build/
+.dart_tool/
+pubspec.lock
+.flutter-plugins-dependencies

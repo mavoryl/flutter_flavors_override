@@ -19,9 +19,11 @@ include: package:lints/recommended.yaml
 #   rules:
 #     - camel_case_types
 
-# analyzer:
-#   exclude:
-#     - path/to/excluded/files/**
+# The e2e fixtures are Flutter packages with their own analysis options; they
+# are analyzed with `flutter analyze` in a temporary copy, not from here.
+analyzer:
+  exclude:
+    - e2e/**
 
 # For more information about the core and recommended set of lints, see
 # https://dart.dev/go/core-lints

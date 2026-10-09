@@ -397,6 +397,19 @@ workspace:
         throwsAbout([project.path('melos.yaml'), 'packages/[']),
       );
     });
+
+    test('in melos.yaml ignore:', () {
+      final root = project.pubspec('.', 'name: root\n');
+      project.file(
+        'melos.yaml',
+        'name: root\npackages:\n  - app\nignore:\n  - legacy/[\n',
+      );
+
+      expect(
+        () => Project.discover(root),
+        throwsAbout([project.path('melos.yaml'), 'legacy/[']),
+      );
+    });
   });
 
   group('symbolic links', () {
@@ -556,6 +569,99 @@ dependencies:
         throwsAbout([project.path('melos.yaml'), '`packages`']),
       );
     });
+
+    test('melos.yaml ignore: globs exclude packages', () {
+      project.file('melos.yaml', '''
+name: root
+packages:
+  - packages/**
+ignore:
+  - packages/legacy
+  - packages/experimental_*
+''');
+      final a = project.pubspec('packages/a', 'name: a\n');
+      project.pubspec('packages/legacy', 'name: legacy\n');
+      project.pubspec('packages/experimental_x', 'name: experimental_x\n');
+
+      expect(Project.discover(root).packages.keys, unorderedEquals([root, a]));
+    });
+
+    test('melos.yaml ignore must be a list of globs', () {
+      project.file(
+        'melos.yaml',
+        'name: root\npackages:\n  - app\nignore: app\n',
+      );
+
+      expect(
+        () => Project.discover(root),
+        throwsAbout([project.path('melos.yaml'), '`ignore`']),
+      );
+    });
+
+    test("melos's default exclusions apply to directories", () {
+      // packages/** matches every one of these, as it does for melos.
+      project.file('melos.yaml', 'name: root\npackages:\n  - packages/**\n');
+      final app = project.pubspec('packages/app', 'name: app\n');
+      project.pubspec('packages/app/ios/.symlinks/plugins/a', 'name: a\n');
+      project.pubspec(
+        'packages/app/macos/Flutter/ephemeral/.symlinks/plugins/b',
+        'name: b\n',
+      );
+      project.pubspec(
+        'packages/app/linux/flutter/ephemeral/.plugin_symlinks/c',
+        'name: c\n',
+      );
+      project.pubspec('packages/app/.dart_tool/d', 'name: d\n');
+      project.pubspec('packages/.fvm/flutter_sdk/packages/e', 'name: e\n');
+
+      expect(
+        Project.discover(root).packages.keys,
+        unorderedEquals([root, app]),
+      );
+    });
+
+    group('directory links', () {
+      test('plugin links into the pub cache are not packages', () {
+        project.file('melos.yaml', 'name: root\npackages:\n  - packages/**\n');
+        final app = project.pubspec('packages/app', 'name: app\n');
+        // What a local iOS, macOS or Linux build leaves: absolute links into
+        // the pub cache, outside the repository.
+        final plugin = project.pubspec('pub_cache/plugin', 'name: plugin\n');
+        project.pubspec('pub_cache/plugin/example', 'name: plugin_example\n');
+        project.link('packages/app/ios/.symlinks/plugins/plugin', plugin);
+        project.link(
+          'packages/app/linux/flutter/ephemeral/.plugin_symlinks/plugin',
+          plugin,
+        );
+
+        final result = Project.discover(app);
+
+        expect(result.root.dir, root);
+        expect(result.packages.keys, unorderedEquals([root, app]));
+      });
+
+      test('a ** glob follows them, as melos does', () {
+        project.file('melos.yaml', 'name: root\npackages:\n  - packages/**\n');
+        final core = project.pubspec('vendor/shared/core', 'name: core\n');
+        project.link('packages/shared', project.path('vendor/shared'));
+
+        expect(
+          Project.discover(root).packages.keys,
+          unorderedEquals([root, core]),
+        );
+      });
+
+      test('a link cycle under a ** glob terminates', () {
+        project.file('melos.yaml', 'name: root\npackages:\n  - packages/**\n');
+        final a = project.pubspec('packages/a', 'name: a\n');
+        project.link('packages/a/loop', '..');
+
+        expect(
+          Project.discover(root).packages.keys,
+          unorderedEquals([root, a]),
+        );
+      }, timeout: const Timeout(Duration(seconds: 20)));
+    }, skip: Platform.isWindows ? 'symbolic links need privileges' : false);
 
     test('two melos packages with one name is an error', () {
       project.file('melos.yaml', 'name: root\npackages:\n  - packages/*\n');

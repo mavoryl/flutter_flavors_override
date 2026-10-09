@@ -225,24 +225,80 @@ class Project {
     }
   }
 
-  /// Packages matched by the `packages:` globs of the melos.yaml at [path].
+  /// What melos 6.3.3 leaves out of every package list, whatever melos.yaml
+  /// says: `PackageMap._commonIgnorePatterns` in its lib/src/package.dart.
+  /// Flutter's plugin links (iOS/macOS `.symlinks/plugins`, Linux/Windows
+  /// `.plugin_symlinks`) point into the pub cache.
+  static const _melosDefaultIgnore = [
+    '**/.dart_tool/**',
+    '**/.symlinks/plugins/**',
+    '**/.fvm/**',
+    '**/.plugin_symlinks/**',
+  ];
+
+  /// The packages of the melos.yaml at [path], found as melos 6.3.3 finds
+  /// them (`PackageMap.resolvePackages`): every `<glob>/pubspec.yaml` of its
+  /// `packages:`, links followed, except those that match `<glob>/pubspec.yaml`
+  /// of its `ignore:` or of [_melosDefaultIgnore]. Globs are relative to the
+  /// melos.yaml.
   static Map<String, LocalPackage> _melosPackages(String path) {
     final rootDir = p.dirname(path);
     final config = readYamlFile(path);
-    final patterns = config is Map<String, Object?> ? config['packages'] : null;
-    if (patterns is! List<Object?> || patterns.any((e) => e is! String)) {
-      throw FlavorOverridesException(
-        '$path: `packages` must be a list of globs.',
-      );
+    List<String> globs(String key, {required bool required}) {
+      final value = config is Map<String, Object?> ? config[key] : null;
+      if (value == null && !required) return const [];
+      if (value is! List<Object?> || value.any((e) => e is! String)) {
+        throw FlavorOverridesException(
+          '$path: `$key` must be a list of globs.',
+        );
+      }
+      return value.cast<String>();
     }
-    return {
-      for (final pattern in patterns.cast<String>())
-        for (final dir in _globPackageDirs(pattern, rootDir, path))
-          dir: LocalPackage.load(dir),
-    };
+
+    final patterns = globs('packages', required: true);
+    final ignore = [
+      for (final pattern in [
+        ...globs('ignore', required: false),
+        ..._melosDefaultIgnore,
+      ])
+        _melosPubspecGlob(pattern, rootDir, path),
+    ];
+    final packages = <String, LocalPackage>{};
+    for (final pattern in patterns) {
+      final glob = _melosPubspecGlob(pattern, rootDir, path);
+      for (final entity in glob.listSync(root: rootDir)) {
+        if (entity is! File || ignore.any((i) => i.matches(entity.path))) {
+          continue;
+        }
+        final dir = canonicalDir(entity.parent.path);
+        packages[dir] ??= LocalPackage.load(dir);
+      }
+    }
+    return packages;
+  }
+
+  /// `<pattern>/pubspec.yaml`, relative to [rootDir], as melos 6.3.3 builds
+  /// it (`PackageMap._createPubspecGlob`).
+  static Glob _melosPubspecGlob(String pattern, String rootDir, String source) {
+    _parseGlob(pattern, source);
+    return Glob(
+      p.posix.normalize('$pattern/pubspec.yaml'),
+      context: p.Context(current: rootDir),
+    );
   }
 
   static bool _isGlob(String entry) => entry.contains(RegExp(r'[*?[{]'));
+
+  /// [pattern] as a glob; [source] is the file it comes from, for errors.
+  static Glob _parseGlob(String pattern, String source) {
+    try {
+      return Glob(pattern);
+    } on FormatException catch (e) {
+      throw FlavorOverridesException(
+        '$source: `$pattern` is not a valid glob: ${e.message}',
+      );
+    }
+  }
 
   /// Directories under [rootDir] that match [pattern] and have pubspec.yaml.
   /// Links are not followed into, so a link cycle cannot loop; a matching
@@ -253,14 +309,7 @@ class Project {
     String rootDir,
     String source,
   ) {
-    final Glob glob;
-    try {
-      glob = Glob(pattern);
-    } on FormatException catch (e) {
-      throw FlavorOverridesException(
-        '$source: `$pattern` is not a valid glob: ${e.message}',
-      );
-    }
+    final glob = _parseGlob(pattern, source);
     return [
       for (final entity in glob.listSync(root: rootDir, followLinks: false))
         if ((entity is Directory ||

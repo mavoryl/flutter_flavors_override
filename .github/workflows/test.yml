@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Explicit, so steps run as `bash --noprofile --norc -eo pipefail`;
+    # without it GitHub uses `bash -e` and a failure inside a pipe goes unnoticed.
+    shell: bash
+
 jobs:
   analyze-and-test:
     name: analyze + unit tests (Dart 3.12.2)
@@ -43,7 +52,7 @@ jobs:
         with:
           sdk: 3.4.0
 
-      # No `grep -q`: it may exit before `tee` finishes writing, and with
+      # No `grep -q`: it may exit before `tee` finishes writing, and under
       # pipefail the resulting SIGPIPE would fail the step.
       - name: assert SDK version
         run: |

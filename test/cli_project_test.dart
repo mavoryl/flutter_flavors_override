@@ -214,6 +214,21 @@ flavor_overrides:
       expect(read('packages/core/pubspec_overrides.yaml'), isNull);
     });
 
+    test('a destination that is not a file fails before any write', () async {
+      modules();
+      project.dir('packages/feature/pubspec_overrides.yaml');
+
+      final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+      expect(result.code, 1);
+      expect(result.out, isEmpty);
+      expect(
+        result.err,
+        contains(project.path('packages/feature/pubspec_overrides.yaml')),
+      );
+      expect(read('app/pubspec_overrides.yaml'), isNull);
+    });
+
     test('prod then dev removes every file', () async {
       modules();
       await cli(['--flavor', 'prod'], dir: 'app');
@@ -442,6 +457,63 @@ dependency_overrides:
         contains(project.path('packages/other/pubspec_overrides.yaml')),
       );
       expect(read('pubspec_overrides.yaml'), isNull);
+    });
+
+    test('lose our entries left in their own file, foreign ones stay',
+        () async {
+      project.pubspec('packages/other', 'name: other\nresolution: workspace\n');
+      // Left by a run before the project became a workspace, then melos.
+      project.file(
+        'packages/other/pubspec_overrides.yaml',
+        '# melos_managed_dependency_overrides: core\n'
+            '# flutter_flavor_overrides: ffo_probe\n'
+            'dependency_overrides:\n'
+            '  core:\n'
+            '    path: ../core\n'
+            '  ffo_probe:\n'
+            '    path: ../../stubs/ffo_probe\n',
+      );
+      project.file(
+        'packages/feature/pubspec_overrides.yaml',
+        '# flutter_flavor_overrides: ffo_probe\n'
+            'dependency_overrides:\n'
+            '  ffo_probe:\n'
+            '    path: ../../stubs/ffo_probe\n',
+      );
+
+      final result = await cli(['--flavor', 'prod']);
+
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+      expect(
+        result.out,
+        'wrote pubspec_overrides.yaml (ffo_probe)\n'
+        'removed packages/feature/pubspec_overrides.yaml\n'
+        'wrote packages/other/pubspec_overrides.yaml\n',
+      );
+      expect(read('packages/feature/pubspec_overrides.yaml'), isNull);
+      expect(
+        read('packages/other/pubspec_overrides.yaml'),
+        '# melos_managed_dependency_overrides: core\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n',
+      );
+    });
+
+    test('--clean also cleans their own files', () async {
+      project.file(
+        'packages/feature/pubspec_overrides.yaml',
+        '# flutter_flavor_overrides: ffo_probe\n'
+            'dependency_overrides:\n'
+            '  ffo_probe:\n'
+            '    path: ../../stubs/ffo_probe\n',
+      );
+
+      final result = await cli(['--clean']);
+
+      expect(result.code, 0);
+      expect(result.out, 'removed packages/feature/pubspec_overrides.yaml\n');
     });
 
     test("the root's own dependency_overrides give way", () async {

@@ -2,10 +2,11 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:path/path.dart' as p;
+import 'package:yaml/yaml.dart';
 
 import 'declarations.dart';
 import 'errors.dart';
-import 'local_package.dart' show readYamlFile;
+import 'local_package.dart' show toPlain;
 import 'overrides_file.dart';
 import 'project.dart';
 
@@ -112,11 +113,7 @@ Future<int> run(
     }
 
     // Plan every file first: an error leaves the project untouched.
-    final changes = [
-      for (final dir in project.resolvingDirs)
-        if (_change(project, dir, clean ? null : flavor) case final change?)
-          change,
-    ];
+    final changes = _plan(project, clean ? null : flavor);
 
     if (changes.isEmpty) {
       output.writeln('up to date');
@@ -154,16 +151,47 @@ Future<int> run(
 /// A pubspec_overrides.yaml to write ([text]) or remove (null text).
 typedef _Change = ({String path, String? text, List<String> packages});
 
-/// The change of the pubspec_overrides.yaml in [dir] for [flavor] (null:
-/// clean), or null when the file stays as it is.
-_Change? _change(Project project, String dir, String? flavor) {
-  final declarations = flavor == null
-      ? const <Declaration>[]
-      : declarationsFor(project, dir, flavor);
-  final path = _overridesPath(dir);
-  if (project.mode == ProjectMode.workspace) {
-    _checkMembers(project, {for (final d in declarations) d.package}, path);
+/// Every file change for [flavor] (null: clean), in output order.
+List<_Change> _plan(Project project, String? flavor) {
+  // Workspace members never hold our entries: drop any left over, e.g. from
+  // before the project became a workspace. What remains must not override
+  // what the root file does (T5).
+  final members = <String, String?>{
+    for (final dir in project.members.toList()..sort())
+      if (dir != project.root.dir) dir: null,
+  };
+  final memberChanges = <_Change>[];
+  for (final dir in members.keys) {
+    final (:change, :text) = _planFile(project, dir, const []);
+    members[dir] = text;
+    if (change != null) memberChanges.add(change);
   }
+
+  final changes = <_Change>[];
+  for (final dir in project.resolvingDirs) {
+    final declarations = flavor == null
+        ? const <Declaration>[]
+        : declarationsFor(project, dir, flavor);
+    _checkMembers(
+      project,
+      members,
+      {for (final d in declarations) d.package},
+      _overridesPath(dir),
+    );
+    final (:change, text: _) = _planFile(project, dir, declarations);
+    if (change != null) changes.add(change);
+  }
+  return [...changes, ...memberChanges];
+}
+
+/// The pubspec_overrides.yaml of [dir] with [declarations] as our entries:
+/// its new text, and the change, null when the file stays as it is.
+({_Change? change, String? text}) _planFile(
+  Project project,
+  String dir,
+  List<Declaration> declarations,
+) {
+  final path = _overridesPath(dir);
   final existing = _read(path);
   final text = mergeOverrides(
     existing: existing,
@@ -171,24 +199,31 @@ _Change? _change(Project project, String dir, String? flavor) {
     pubspecOverrides: project.packages[dir]!.dependencyOverrides,
     filePath: path,
   );
-  if (text == existing) return null;
+  if (text == existing) return (change: null, text: text);
   return (
-    path: path,
+    change: (
+      path: path,
+      text: text,
+      packages: [for (final d in declarations) d.package],
+    ),
     text: text,
-    packages: [for (final d in declarations) d.package],
   );
 }
 
 /// pub fails when a workspace overrides a package in two files (T5): no member
-/// but the root may override what [rootFile] is about to.
-void _checkMembers(Project project, Set<String> packages, String rootFile) {
+/// may override what [rootFile] is about to. [members] maps member dirs to
+/// their planned pubspec_overrides.yaml text.
+void _checkMembers(
+  Project project,
+  Map<String, String?> members,
+  Set<String> packages,
+  String rootFile,
+) {
   if (packages.isEmpty) return;
-  for (final dir in project.members.toList()..sort()) {
-    if (dir == project.root.dir) continue;
+  for (final MapEntry(key: dir, value: text) in members.entries) {
     final member = project.packages[dir]!;
     final overridesPath = _overridesPath(dir);
-    final overridesFile =
-        _read(overridesPath) == null ? null : readYamlFile(overridesPath);
+    final overridesFile = text == null ? null : toPlain(loadYaml(text));
     final sources = [
       (member.pubspecPath, member.dependencyOverrides),
       if (overridesFile is Map<String, Object?>)
@@ -228,8 +263,14 @@ String _overridesPath(String dir) => p.join(dir, 'pubspec_overrides.yaml');
 
 /// Content of the file at [path], or null when there is none.
 String? _read(String path) {
-  final file = File(path);
-  return file.existsSync() ? file.readAsStringSync() : null;
+  switch (FileSystemEntity.typeSync(path)) {
+    case FileSystemEntityType.notFound:
+      return null;
+    case FileSystemEntityType.file:
+      return File(path).readAsStringSync();
+    default:
+      throw FlavorOverridesException('$path: exists, but is not a file.');
+  }
 }
 
 /// [path] relative to the project root, with `/`.

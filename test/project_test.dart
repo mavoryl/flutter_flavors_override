@@ -66,9 +66,9 @@ dependencies:
       expect(result.packages[core]!.name, 'core');
       expect(result.resolvingDirs,
           dirs(['app', 'packages/core', 'packages/feature']));
-      expect(result.localDependencies(app, resolving: true), [feature]);
-      expect(result.localDependencies(feature, resolving: false), [core]);
-      expect(result.localDependencies(core, resolving: true), isEmpty);
+      expect(result.localDependencies(app, resolution: app), [feature]);
+      expect(result.localDependencies(feature, resolution: app), [core]);
+      expect(result.localDependencies(core, resolution: core), isEmpty);
       expect(result.reachableFrom(app), {app, feature, core});
       expect(result.reachableFrom(feature), {feature, core});
       expect(result.reachableFrom(core), {core});
@@ -130,8 +130,8 @@ dependencies:
 
       expect(result.packages.keys,
           unorderedEquals(dirs(['app', 'a', 'b', 'core'])));
-      expect(result.localDependencies(project.path('b'), resolving: false),
-          [core]);
+      expect(
+          result.localDependencies(project.path('b'), resolution: app), [core]);
       expect(
           result.reachableFrom(app), dirs(['app', 'a', 'b', 'core']).toSet());
     });
@@ -164,9 +164,9 @@ dev_dependencies:
         result.packages.keys,
         unorderedEquals([app, feature, appTools, featureTools]),
       );
-      expect(result.localDependencies(feature, resolving: false), isEmpty);
-      expect(
-          result.localDependencies(feature, resolving: true), [featureTools]);
+      expect(result.localDependencies(feature, resolution: app), isEmpty);
+      expect(result.localDependencies(feature, resolution: feature),
+          [featureTools]);
       expect(result.reachableFrom(app), {app, feature, appTools});
       expect(result.reachableFrom(feature), {feature, featureTools});
     });
@@ -211,7 +211,7 @@ dependencies:
       final result = Project.discover(app);
 
       expect(result.packages.keys, [app]);
-      expect(result.localDependencies(app, resolving: true), isEmpty);
+      expect(result.localDependencies(app, resolution: app), isEmpty);
       expect(result.warnings, [
         allOf(
           contains(project.path('app/pubspec.yaml')),
@@ -224,6 +224,99 @@ dependencies:
       final app = project.pubspec('app', 'name: app\n');
 
       expect(Project.discover(app).warnings, isEmpty);
+    });
+
+    group('a path: override', () {
+      test('of a dependency replaces its spec', () {
+        final app = project.pubspec('app', '''
+name: app
+dependencies:
+  feature: any
+  core:
+    path: ../core_old
+dependency_overrides:
+  feature:
+    path: ../feature
+  core:
+    path: ../core
+''');
+        final feature = project.pubspec('feature', 'name: feature\n');
+        final core = project.pubspec('core', 'name: core\n');
+        project.pubspec('core_old', 'name: core\n');
+
+        final result = Project.discover(app);
+
+        expect(result.packages.keys, unorderedEquals([app, feature, core]));
+        expect(result.reachableFrom(app), {app, feature, core});
+      });
+
+      test('applies to a dependency of any package in the resolution', () {
+        final app = project.pubspec('app', '''
+name: app
+dependencies:
+  feature:
+    path: ../feature
+dependency_overrides:
+  core:
+    path: ../core
+''');
+        final feature = project.pubspec('feature', '''
+name: feature
+dependencies:
+  core: ^1.0.0
+''');
+        final core = project.pubspec('core', 'name: core\n');
+
+        final result = Project.discover(app);
+
+        expect(result.packages.keys, unorderedEquals([app, feature, core]));
+        expect(result.reachableFrom(app), {app, feature, core});
+        // feature resolves on its own, without the overrides of app.
+        expect(result.reachableFrom(feature), {feature});
+      });
+
+      test('of a package no local package depends on is reached anyway', () {
+        // A fork of a package that a hosted dependency depends on.
+        final app = project.pubspec('app', '''
+name: app
+dependencies:
+  http: 1.0.0
+dependency_overrides:
+  http_parser:
+    path: ../http_parser
+''');
+        final fork = project.pubspec('http_parser', 'name: http_parser\n');
+
+        final result = Project.discover(app);
+
+        expect(result.packages.keys, unorderedEquals([app, fork]));
+        expect(result.reachableFrom(app), {app, fork});
+      });
+
+      test('of a dependency applies in its own resolution only', () {
+        final app = project.pubspec('app', '''
+name: app
+dependencies:
+  core: ^1.0.0
+  feature:
+    path: ../feature
+''');
+        final feature = project.pubspec('feature', '''
+name: feature
+dependencies:
+  core: ^1.0.0
+dependency_overrides:
+  core:
+    path: ../core
+''');
+        final core = project.pubspec('core', 'name: core\n');
+
+        final result = Project.discover(app);
+
+        expect(result.packages.keys, unorderedEquals([app, feature, core]));
+        expect(result.reachableFrom(feature), {feature, core});
+        expect(result.reachableFrom(app), {app, feature});
+      });
     });
   });
 
@@ -396,8 +489,33 @@ workspace:
 
       final result = Project.discover(root);
 
-      expect(result.localDependencies(app, resolving: true), [feature]);
+      expect(result.localDependencies(app, resolution: root), [feature]);
       expect(result.reachableFrom(app), {app, feature});
+    });
+
+    test("a member's path: override applies to the whole workspace", () {
+      final root = project.pubspec('.', '''
+name: root
+workspace:
+  - app
+  - feature
+''');
+      final app = member('app', '''
+dependency_overrides:
+  core:
+    path: ../core
+''');
+      final feature = member('feature', 'dependencies:\n  core: ^1.0.0\n');
+      final core = project.pubspec('core', 'name: core\n');
+
+      final result = Project.discover(root);
+
+      expect(result.members, {root, app, feature});
+      expect(
+        result.packages.keys,
+        unorderedEquals([root, app, feature, core]),
+      );
+      expect(result.reachableFrom(feature), {feature, core});
     });
   });
 
@@ -464,8 +582,8 @@ dependencies:
 
       expect(result.packages.keys,
           unorderedEquals(dirs(['app', 'a', 'b', 'core'])));
-      expect(result.localDependencies(project.path('b'), resolving: false),
-          [core]);
+      expect(
+          result.localDependencies(project.path('b'), resolution: app), [core]);
       expect(
         result.reachableFrom(project.path('links/core_alias')),
         {core},
@@ -537,7 +655,7 @@ dependencies:
       expect(result.members, isEmpty);
       expect(result.packages.keys, unorderedEquals([root, app, feature]));
       expect(result.resolvingDirs, dirs(['.', 'app', 'packages/feature']));
-      expect(result.localDependencies(app, resolving: false), [feature]);
+      expect(result.localDependencies(app, resolution: root), [feature]);
       expect(result.reachableFrom(app), {app, feature});
       expect(result.reachableFrom(root), {root});
     });
@@ -562,8 +680,8 @@ dependencies:
       final result = Project.discover(root);
 
       expect(result.packages.keys, unorderedEquals([root, app, feature, core]));
-      expect(result.localDependencies(app, resolving: true), [feature]);
-      expect(result.localDependencies(feature, resolving: true), [core]);
+      expect(result.localDependencies(app, resolution: app), [feature]);
+      expect(result.localDependencies(feature, resolution: feature), [core]);
     });
 
     test('without melos.yaml nothing is linked by name', () {
@@ -726,7 +844,7 @@ dependencies:
         expect(result.members, isEmpty);
         expect(result.packages.keys, unorderedEquals([root, app, feature]));
         expect(result.resolvingDirs, dirs(['.', 'app', 'packages/feature']));
-        expect(result.localDependencies(app, resolving: false), [feature]);
+        expect(result.localDependencies(app, resolution: root), [feature]);
       });
 
       test('not one of the melos packages is its own root', () {

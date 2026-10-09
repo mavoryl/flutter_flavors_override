@@ -293,6 +293,38 @@ flavor_overrides:
       expect(read('packages/core/pubspec_overrides.yaml'), isNull);
     });
 
+    test('a package linked by a path: override reaches the declaration',
+        () async {
+      modules();
+      project.pubspec('app', '''
+name: app
+dependencies:
+  feature: any
+dependency_overrides:
+  feature:
+    path: ../packages/feature
+''');
+
+      final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+      expect(
+        result.out,
+        'wrote pubspec_overrides.yaml (ffo_probe)\n'
+        'wrote ../packages/feature/pubspec_overrides.yaml (ffo_probe)\n',
+      );
+      expect(
+        read('app/pubspec_overrides.yaml'),
+        '# flutter_flavor_overrides: feature,ffo_probe\n'
+        'dependency_overrides:\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+    });
+
     test('a destination that is not a file fails before any write', () async {
       modules();
       project.dir('packages/feature/pubspec_overrides.yaml');

@@ -25,7 +25,9 @@ class Project {
     required this.members,
     required this.warnings,
     required Map<String, String> linkedByName,
-  }) : _linkedByName = linkedByName;
+    required Map<String, String> workspaceOverrides,
+  })  : _linkedByName = linkedByName,
+        _workspaceOverrides = workspaceOverrides;
 
   /// Workspace root; without a workspace, the root of the melos repository
   /// the start package belongs to, else the start package.
@@ -34,7 +36,8 @@ class Project {
   final ProjectMode mode;
 
   /// Every local package found, keyed by absolute dir: root, workspace members,
-  /// melos packages, everything reachable through local edges.
+  /// melos packages, everything reachable through local edges, `path:`
+  /// overrides of a package that resolves included.
   final Map<String, LocalPackage> packages;
 
   /// Workspace mode: dirs of the root and every workspace member, nested
@@ -49,6 +52,10 @@ class Project {
   /// without `path:`: workspace members, melos packages.
   final Map<String, String> _linkedByName;
 
+  /// Workspace mode: package name → dir of the `path:` overrides of every
+  /// member, which pub applies to the whole workspace. Packages mode: empty.
+  final Map<String, String> _workspaceOverrides;
+
   /// Dirs of packages that resolve on their own: workspace → [root]; packages
   /// mode → every local package. Sorted.
   List<String> get resolvingDirs => switch (mode) {
@@ -56,32 +63,40 @@ class Project {
         ProjectMode.packages => packages.keys.toList()..sort(),
       };
 
-  /// Dirs of local packages [dir] depends on, sorted. [resolving] adds
+  /// Dirs of local packages [dir] depends on in the resolution of
+  /// [resolution], one of [resolvingDirs], sorted. A package that resolves
+  /// ([resolution] itself; workspace mode: every member) adds its
   /// dev_dependencies.
-  List<String> localDependencies(String dir, {required bool resolving}) {
+  List<String> localDependencies(String dir, {required String resolution}) {
+    final package = _package(dir);
     final dirs = {
       for (final edge in _edges(
-        _package(dir),
-        resolving: resolving,
+        package,
+        resolving: switch (mode) {
+          ProjectMode.workspace => members.contains(package.dir),
+          ProjectMode.packages => package.dir == _package(resolution).dir,
+        },
         linkedByName: _linkedByName,
+        overrides: switch (mode) {
+          ProjectMode.workspace => _workspaceOverrides,
+          ProjectMode.packages => _pathOverrides(_package(resolution)),
+        },
       ))
         if (packages.containsKey(edge.dir)) edge.dir,
     };
     return dirs.toList()..sort();
   }
 
-  /// [dir] plus everything reachable from it (dev_dependencies only at the
-  /// first hop from a resolving package; workspace mode: every member is
-  /// resolving).
+  /// [dir] plus everything reachable from it in its resolution: its own
+  /// (packages mode) or the workspace's.
   Set<String> reachableFrom(String dir) {
     final start = _package(dir).dir;
+    final resolution = mode == ProjectMode.workspace ? root.dir : start;
     final result = {start};
     final queue = [start];
     while (queue.isNotEmpty) {
       final current = queue.removeLast();
-      final resolving = (current == start && mode == ProjectMode.packages) ||
-          members.contains(current);
-      for (final next in localDependencies(current, resolving: resolving)) {
+      for (final next in localDependencies(current, resolution: resolution)) {
         if (result.add(next)) queue.add(next);
       }
     }
@@ -115,31 +130,47 @@ class Project {
       // melos 6 links a dependency on a melos package's name to the package.
       final linkedByName = _byName(melosPackages.values);
       final packages = {...melosPackages, root.dir: root};
-      final warnings = <String>[];
-      _addReachable(
-        packages,
-        linkedByName: linkedByName,
-        isResolving: (_) => true,
-        warnings: warnings,
-      );
+      final warnings = <String>{};
+      // Every local package resolves on its own, with its own overrides.
+      final pending = [...packages.keys];
+      final resolved = <String>{};
+      while (pending.isNotEmpty) {
+        final dir = pending.removeLast();
+        if (!resolved.add(dir)) continue;
+        pending.addAll(_addResolution(
+          packages,
+          from: [dir],
+          linkedByName: linkedByName,
+          overrides: _pathOverrides(packages[dir]!),
+          isResolving: (other) => other == dir,
+          warnings: warnings,
+        ));
+      }
       return Project._(
         root: root,
         mode: ProjectMode.packages,
         packages: packages,
         members: const {},
-        warnings: warnings,
+        warnings: warnings.toList(),
         linkedByName: linkedByName,
+        workspaceOverrides: const {},
       );
     }
 
     final members = _workspaceMembers(root);
     // pub resolves a dependency on a member's name to the member.
     final linkedByName = _byName(members.values);
+    final overrides = {
+      for (final dir in members.keys.toList()..sort())
+        ..._pathOverrides(members[dir]!),
+    };
     final packages = {...members};
-    final warnings = <String>[];
-    _addReachable(
+    final warnings = <String>{};
+    _addResolution(
       packages,
+      from: members.keys,
       linkedByName: linkedByName,
+      overrides: overrides,
       isResolving: members.containsKey,
       warnings: warnings,
     );
@@ -148,8 +179,9 @@ class Project {
       mode: ProjectMode.workspace,
       packages: packages,
       members: members.keys.toSet(),
-      warnings: warnings,
+      warnings: warnings.toList(),
       linkedByName: linkedByName,
+      workspaceOverrides: overrides,
     );
   }
 
@@ -352,59 +384,82 @@ class Project {
     };
   }
 
-  /// Adds to [packages] every package reachable from them through local
-  /// edges. An edge to a directory that does not exist is skipped, with a
-  /// message added to [warnings].
-  static void _addReachable(
+  /// Adds to [packages] every package of one resolution: those reachable
+  /// from the packages [from] through local edges, where [isResolving]
+  /// packages add their dev_dependencies and [overrides] apply. Returns the
+  /// dirs reached. An edge to a directory that does not exist is skipped,
+  /// with a message added to [warnings].
+  static Set<String> _addResolution(
     Map<String, LocalPackage> packages, {
+    required Iterable<String> from,
     required Map<String, String> linkedByName,
+    required Map<String, String> overrides,
     required bool Function(String dir) isResolving,
-    required List<String> warnings,
+    required Set<String> warnings,
   }) {
-    final queue = [...packages.values];
+    final reached = {...from};
+    final queue = [...from];
     while (queue.isNotEmpty) {
-      final package = queue.removeLast();
+      final package = packages[queue.removeLast()]!;
       for (final edge in _edges(
         package,
         resolving: isResolving(package.dir),
         linkedByName: linkedByName,
+        overrides: overrides,
       )) {
-        if (packages.containsKey(edge.dir)) continue;
-        if (FileSystemEntity.typeSync(edge.dir) ==
-            FileSystemEntityType.notFound) {
-          warnings.add(
-            '${package.pubspecPath}: dependency `${edge.name}` points to '
-            '${edge.dir}, which does not exist; skipped.',
-          );
-          continue;
+        if (reached.contains(edge.dir)) continue;
+        if (!packages.containsKey(edge.dir)) {
+          if (FileSystemEntity.typeSync(edge.dir) ==
+              FileSystemEntityType.notFound) {
+            warnings.add(
+              '${package.pubspecPath}: dependency `${edge.name}` points to '
+              '${edge.dir}, which does not exist; skipped.',
+            );
+            continue;
+          }
+          if (!_hasPubspec(edge.dir)) {
+            throw FlavorOverridesException(
+              '${package.pubspecPath}: dependency `${edge.name}` points to '
+              '${edge.dir}, which has no pubspec.yaml.',
+            );
+          }
+          packages[edge.dir] = LocalPackage.load(edge.dir);
         }
-        if (!_hasPubspec(edge.dir)) {
-          throw FlavorOverridesException(
-            '${package.pubspecPath}: dependency `${edge.name}` points to '
-            '${edge.dir}, which has no pubspec.yaml.',
-          );
-        }
-        final dependency = LocalPackage.load(edge.dir);
-        packages[dependency.dir] = dependency;
-        queue.add(dependency);
+        reached.add(edge.dir);
+        queue.add(edge.dir);
       }
     }
+    return reached;
   }
 
-  /// Local dependencies of [package]: those given by `path:`, and those given
-  /// otherwise whose name is in [linkedByName].
+  /// Local dependencies of [package] in a resolution whose `path:` overrides
+  /// are [overrides] (package name → dir). A dependency on an overridden
+  /// name is on the override's dir, whatever its spec; otherwise one given
+  /// by `path:` is local, and one given otherwise is local if its name is in
+  /// [linkedByName]. A [resolving] package adds its dev_dependencies, and
+  /// the dirs of its own `path:` overrides: it may reach those through
+  /// packages that are not local.
   static List<({String name, String dir})> _edges(
     LocalPackage package, {
     required bool resolving,
     required Map<String, String> linkedByName,
+    required Map<String, String> overrides,
   }) {
-    final edges = <({String name, String dir})>[];
+    final edges = <({String name, String dir})>[
+      if (resolving)
+        for (final MapEntry(key: name, value: dir)
+            in _pathOverrides(package).entries)
+          (name: name, dir: dir),
+    ];
     void add(String name, Object? spec) {
+      final overridden = overrides[name];
+      if (overridden != null) {
+        edges.add((name: name, dir: overridden));
+        return;
+      }
       if (spec is Map<String, Object?> && spec.containsKey('path')) {
-        final path = spec['path'];
-        if (path is String) {
-          edges.add((name: name, dir: canonicalDir(p.join(package.dir, path))));
-        }
+        final dir = _pathDir(package, spec);
+        if (dir != null) edges.add((name: name, dir: dir));
         return;
       }
       final linked = linkedByName[name];
@@ -414,5 +469,21 @@ class Project {
     package.dependencies.forEach(add);
     if (resolving) package.devDependencies.forEach(add);
     return edges;
+  }
+
+  /// Package name → dir of the `dependency_overrides` of [package] given by
+  /// `path:`.
+  static Map<String, String> _pathOverrides(LocalPackage package) => {
+        for (final MapEntry(key: name, value: spec)
+            in package.dependencyOverrides.entries)
+          if (_pathDir(package, spec) case final dir?) name: dir,
+      };
+
+  /// The dir of the `path:` of [spec], a dependency of [package]; null when
+  /// it has none.
+  static String? _pathDir(LocalPackage package, Object? spec) {
+    if (spec is! Map<String, Object?>) return null;
+    final path = spec['path'];
+    return path is String ? canonicalDir(p.join(package.dir, path)) : null;
   }
 }

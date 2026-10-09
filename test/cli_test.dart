@@ -1,4 +1,4 @@
-import 'package:flutter_flavors_override/flutter_flavors_override.dart';
+import 'package:flutter_flavor_overrides/flutter_flavor_overrides.dart';
 import 'package:test/test.dart';
 
 void main() {

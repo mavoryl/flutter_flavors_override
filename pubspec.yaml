@@ -1,4 +1,4 @@
-name: flutter_flavors_override
+name: flutter_flavor_overrides
 description: >-
   CLI that swaps dependencies per Flutter flavor by generating
   pubspec_overrides.yaml, so a plugin's native code stays out of flavors that
@@ -9,7 +9,7 @@ environment:
   sdk: '>=3.4.0 <4.0.0'
 
 executables:
-  flutter_flavors_override:
+  flutter_flavor_overrides:
 
 dependencies:
   args: 2.7.0

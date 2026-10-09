@@ -570,5 +570,110 @@ dependencies:
         ]),
       );
     });
+
+    group('starting from a package', () {
+      test('one of the melos packages finds the melos root', () {
+        project.file('melos.yaml', '''
+name: root
+packages:
+  - app
+  - packages/*
+''');
+        final app = project.pubspec('app', '''
+name: app
+dependencies:
+  feature: 0.0.1
+''');
+        final feature = project.pubspec('packages/feature', 'name: feature\n');
+
+        final result = Project.discover(app);
+
+        expect(result.mode, ProjectMode.packages);
+        expect(result.root.dir, root);
+        expect(result.members, isEmpty);
+        expect(result.packages.keys, unorderedEquals([root, app, feature]));
+        expect(result.resolvingDirs, dirs(['.', 'app', 'packages/feature']));
+        expect(result.localDependencies(app, resolving: false), [feature]);
+      });
+
+      test('not one of the melos packages is its own root', () {
+        project.file('melos.yaml', 'name: root\npackages:\n  - app\n');
+        project.pubspec('app', 'name: app\n');
+        final tool = project.pubspec('tool', '''
+name: tool
+dependencies:
+  app: 0.0.1
+''');
+
+        final result = Project.discover(tool);
+
+        expect(result.root.dir, tool);
+        expect(result.packages.keys, [tool]);
+      });
+
+      test('melos.yaml without pubspec.yaml next to it is an error naming it',
+          () {
+        project.file('repo/melos.yaml', 'name: repo\npackages:\n  - app\n');
+        final app = project.pubspec('repo/app', 'name: app\n');
+
+        expect(
+          () => Project.discover(app),
+          throwsAbout([project.path('repo/melos.yaml'), 'pubspec.yaml']),
+        );
+      });
+
+      test('the nearest melos.yaml wins', () {
+        project.file('melos.yaml', 'name: root\npackages:\n  - repo/app\n');
+        final repo = project.pubspec('repo', 'name: repo\n');
+        project.file('repo/melos.yaml', 'name: repo\npackages:\n  - app\n');
+        final app = project.pubspec('repo/app', 'name: app\n');
+
+        final result = Project.discover(app);
+
+        expect(result.root.dir, repo);
+        expect(result.packages.keys, unorderedEquals([repo, app]));
+      });
+
+      test('the nearest melos.yaml not listing it ends the search', () {
+        project.file('melos.yaml', 'name: root\npackages:\n  - repo/app\n');
+        project.pubspec('repo', 'name: repo\n');
+        project.file('repo/melos.yaml', 'name: repo\npackages:\n  - other\n');
+        final app = project.pubspec('repo/app', 'name: app\n');
+
+        final result = Project.discover(app);
+
+        expect(result.root.dir, app);
+        expect(result.packages.keys, [app]);
+      });
+
+      test('a melos root with a pub workspace is not its root', () {
+        project.pubspec('.', 'name: root\nworkspace:\n  - packages/*\n');
+        project.file('melos.yaml', 'name: root\npackages:\n  - app\n');
+        final app = project.pubspec('app', 'name: app\n');
+
+        final result = Project.discover(app);
+
+        expect(result.mode, ProjectMode.packages);
+        expect(result.root.dir, app);
+        expect(result.packages.keys, [app]);
+      });
+
+      test('a workspace member keeps its workspace root', () {
+        project.pubspec('.', 'name: root\nworkspace:\n  - packages/*\n');
+        // A melos root nearer than the workspace root, listing the member.
+        project.pubspec('packages', 'name: packages\n');
+        project.file('packages/melos.yaml', 'name: p\npackages:\n  - "*"\n');
+        final feature = project.pubspec(
+          'packages/feature',
+          'name: feature\nresolution: workspace\n',
+        );
+
+        final result = Project.discover(feature);
+
+        expect(result.mode, ProjectMode.workspace);
+        expect(result.root.dir, root);
+        expect(result.members, {root, feature});
+      });
+    });
   });
 }

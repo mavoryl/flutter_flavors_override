@@ -26,7 +26,8 @@ class Project {
     required Map<String, String> linkedByName,
   }) : _linkedByName = linkedByName;
 
-  /// Workspace root, or the start package when there is no workspace.
+  /// Workspace root; without a workspace, the root of the melos repository
+  /// the start package belongs to, else the start package.
   final LocalPackage root;
 
   final ProjectMode mode;
@@ -92,7 +93,9 @@ class Project {
 
   /// Start at [startDir] (must contain pubspec.yaml). If the package has
   /// `resolution: workspace`, walk up to the nearest ancestor whose expanded
-  /// `workspace:` contains it; error if none.
+  /// `workspace:` contains it; error if none. Without a workspace, the root is
+  /// that of the melos repository the package belongs to, if any (see
+  /// [_melosRepository]).
   static Project discover(String startDir) {
     var root = LocalPackage.load(startDir);
     // A root can itself be a member of an outer workspace.
@@ -101,7 +104,9 @@ class Project {
     }
 
     if (root.workspace == null) {
-      final melosPackages = _melosPackages(root.dir);
+      final melos = _melosRepository(root);
+      root = melos?.root ?? root;
+      final melosPackages = melos?.packages ?? const <String, LocalPackage>{};
       // melos 6 links a dependency on a melos package's name to the package.
       final linkedByName = _byName(melosPackages.values);
       final packages = {...melosPackages, root.dir: root};
@@ -193,11 +198,36 @@ class Project {
     return dirs.toList()..sort();
   }
 
-  /// Packages matched by the `packages:` globs of `<rootDir>/melos.yaml`;
-  /// empty when there is no melos.yaml.
-  static Map<String, LocalPackage> _melosPackages(String rootDir) {
-    final path = p.join(rootDir, 'melos.yaml');
-    if (!File(path).existsSync()) return {};
+  /// The melos repository [start] belongs to: the nearest melos.yaml in the
+  /// dir of [start] or above, if it is next to [start] or its `packages:`
+  /// match [start]; the root is the package next to it. Null when there is no
+  /// melos.yaml, when the nearest one does not list [start] (no search
+  /// further up), or when the root has a `workspace:` (which resolves its
+  /// members only).
+  static ({LocalPackage root, Map<String, LocalPackage> packages})?
+      _melosRepository(LocalPackage start) {
+    for (var dir = start.dir;; dir = p.dirname(dir)) {
+      final path = p.join(dir, 'melos.yaml');
+      if (File(path).existsSync()) {
+        final packages = _melosPackages(path);
+        if (dir != start.dir && !packages.containsKey(start.dir)) return null;
+        if (!_hasPubspec(dir)) {
+          throw FlavorOverridesException(
+            '$path: lists ${start.dir}, but its directory has no '
+            'pubspec.yaml.',
+          );
+        }
+        final root = dir == start.dir ? start : LocalPackage.load(dir);
+        if (root.workspace != null) return null;
+        return (root: root, packages: packages);
+      }
+      if (p.dirname(dir) == dir) return null;
+    }
+  }
+
+  /// Packages matched by the `packages:` globs of the melos.yaml at [path].
+  static Map<String, LocalPackage> _melosPackages(String path) {
+    final rootDir = p.dirname(path);
     final config = readYamlFile(path);
     final patterns = config is Map<String, Object?> ? config['packages'] : null;
     if (patterns is! List<Object?> || patterns.any((e) => e is! String)) {

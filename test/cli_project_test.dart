@@ -283,6 +283,56 @@ flavor_overrides:
     });
   });
 
+  group('melos packages without a workspace', () {
+    /// The e2e melos6 layout: app depends on feature by version, melos links
+    /// it; feature declares prod.
+    void melos() {
+      project.pubspec('.', 'name: root\ndev_dependencies:\n  melos: 6.3.3\n');
+      project.file('melos.yaml', '''
+name: root
+packages:
+  - app
+  - packages/*
+''');
+      project.pubspec('app', 'name: app\ndependencies:\n  feature: 0.0.1\n');
+      project.pubspec('packages/feature', '''
+name: feature
+version: 0.0.1
+dependencies:
+  ffo_probe: 1.0.0
+flavor_overrides:
+  prod:
+    ffo_probe:
+      path: ../../stubs/ffo_probe
+''');
+    }
+
+    test('a run from a melos package writes what a run from the root does',
+        () async {
+      melos();
+
+      final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+      expect(
+        result.out,
+        'wrote app/pubspec_overrides.yaml (ffo_probe)\n'
+        'wrote packages/feature/pubspec_overrides.yaml (ffo_probe)\n',
+      );
+      expect(read('app/pubspec_overrides.yaml'), probeFile);
+      expect(
+        read('packages/feature/pubspec_overrides.yaml'),
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  ffo_probe:\n'
+        '    path: ../../stubs/ffo_probe\n',
+      );
+      expect(read('pubspec_overrides.yaml'), isNull);
+      expect((await cli(['--flavor', 'prod'])).out, 'up to date\n');
+    });
+  });
+
   group('--clean', () {
     test('removes our entries and keeps what melos merged in', () async {
       singlePackage();

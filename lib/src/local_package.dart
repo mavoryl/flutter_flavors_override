@@ -46,18 +46,10 @@ class LocalPackage {
   static LocalPackage load(String dir) {
     final normalized = p.normalize(p.absolute(dir));
     final pubspecPath = p.join(normalized, 'pubspec.yaml');
-    final file = File(pubspecPath);
-    if (!file.existsSync()) {
+    if (!File(pubspecPath).existsSync()) {
       throw FlavorOverridesException('$pubspecPath: not found.');
     }
-    final Object? document;
-    try {
-      document = toPlain(loadYaml(file.readAsStringSync()));
-    } on YamlException catch (e) {
-      throw FlavorOverridesException(
-        '$pubspecPath: not valid YAML: ${_describe(e)}',
-      );
-    }
+    final document = readYamlFile(pubspecPath);
     if (document is! Map<String, Object?>) {
       throw FlavorOverridesException('$pubspecPath: must be a map.');
     }
@@ -99,11 +91,19 @@ class LocalPackage {
       },
     );
   }
+}
 
-  static String _describe(YamlException e) {
+/// Reads the YAML file at [path] as plain Dart values. Throws
+/// [FlavorOverridesException] naming the file when it is not valid YAML.
+Object? readYamlFile(String path) {
+  try {
+    return toPlain(loadYaml(File(path).readAsStringSync()));
+  } on YamlException catch (e) {
     final start = e.span?.start;
-    if (start == null) return e.message;
-    return '${e.message} (line ${start.line + 1}, column ${start.column + 1})';
+    final where = start == null
+        ? ''
+        : ' (line ${start.line + 1}, column ${start.column + 1})';
+    throw FlavorOverridesException('$path: not valid YAML: ${e.message}$where');
   }
 }
 

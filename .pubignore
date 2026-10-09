@@ -1,9 +1,9 @@
-# pub читает этот файл вместо .gitignore, поэтому исключения из .gitignore повторены здесь.
+# pub reads this file instead of .gitignore, so the .gitignore entries are repeated here.
 
-# Документация проекта: хранилище Obsidian
+# The author's private wiki (an Obsidian vault).
 /wiki/
 
-# Инструкции для Claude Code (на любом уровне)
+# Claude Code instructions, at any level.
 CLAUDE.md
 
 # Miscellaneous

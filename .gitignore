@@ -18,8 +18,8 @@ pubspec.lock
 /doc/api/
 /coverage/
 
-# Приватная вики автора (хранилище Obsidian) в публичный репозиторий не попадает
+# The author's private wiki (an Obsidian vault) stays out of the public repository.
 /wiki/
 
-# Инструкции для Claude Code — пока не публикуем
+# Claude Code instructions: not published for now.
 CLAUDE.md

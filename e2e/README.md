@@ -70,12 +70,13 @@ e2e/tool/verify.sh <single|workspace|path_modules|melos6> <android|ios-cocoapods
 
 The script never builds in the repository. It copies `e2e/` (the files a fresh
 checkout would have) to a temporary directory and runs the CLI of this
-repository there, `dart run <repo>/bin/flutter_flavor_overrides.dart --flavor
-<flavor>`, from where a developer would: the app for `single` and
-`path_modules`, the root for `workspace` and `melos6`. Then it runs
-`flutter pub get` (at the workspace root for `workspace`, in the app and the
-feature package for `path_modules`; `dart run melos bootstrap` for `melos6`)
-and builds the app:
+repository there, `bin/flutter_flavor_overrides.dart --flavor <flavor>`, from
+where a developer would: the app for `single` and `path_modules`, the root for
+`workspace` and `melos6`. It passes the repository's package config to `dart`
+explicitly: `dart run <file>` would first run `pub get` in the fixture, before
+the overrides exist. Then it runs `flutter pub get` (at the workspace root for
+`workspace`, in the app and the feature package for `path_modules`; `dart run
+melos bootstrap` for `melos6`) and builds the app:
 
 - `flutter build apk --release --flavor <flavor>`, or
 - `flutter build ios --release --flavor <flavor> --no-codesign`, after setting

@@ -20,9 +20,10 @@
 #
 # The fixture is never built in place. The script copies e2e/ (tracked and
 # untracked-but-not-ignored files, as in a fresh checkout) to a temporary
-# directory and runs the CLI of this repository in the copy,
-# `dart run <repo>/bin/flutter_flavor_overrides.dart --flavor <flavor>`, from
-# the app or from the root of the workspace or melos repository. With --golden
+# directory and runs the CLI of this repository in the copy, `dart
+# --packages=<repo>/.dart_tool/package_config.json
+# <repo>/bin/flutter_flavor_overrides.dart --flavor <flavor>`, from the app or
+# from the root of the workspace or melos repository. With --golden
 # it removes every pubspec_overrides.yaml in the copy instead and lays out the
 # golden files (the same tree as the fixture). For iOS it sets `flutter:
 # config: enable-swift-package-manager:` in the copy of the app's pubspec, so
@@ -140,8 +141,11 @@ cli() {
     fi
   fi
   echo "   flutter_flavor_overrides $*"
+  # An explicit --packages: `dart run <file>` would first resolve the package
+  # in the current directory, i.e. run `pub get` in the fixture before the
+  # overrides exist.
   local out status=0
-  out=$(cd "$cli_dir" && dart run "$repo/bin/flutter_flavor_overrides.dart" "$@" 2>&1) || status=$?
+  out=$(cd "$cli_dir" && dart --packages="$config" "$repo/bin/flutter_flavor_overrides.dart" "$@" 2>&1) || status=$?
   sed 's/^/     /' <<<"$out"
   if [[ $status -ne 0 ]]; then
     echo "FAIL  flutter_flavor_overrides $* exited with $status"

@@ -1,0 +1,24 @@
+# pub читает этот файл вместо .gitignore, поэтому исключения из .gitignore повторены здесь.
+
+# Документация проекта: хранилище Obsidian
+/wiki/
+
+# Инструкции для Claude Code (на любом уровне)
+CLAUDE.md
+
+# Miscellaneous
+*.log
+*.swp
+.DS_Store
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# Dart/Pub related
+.dart_tool/
+pubspec.lock
+/doc/api/
+/coverage/

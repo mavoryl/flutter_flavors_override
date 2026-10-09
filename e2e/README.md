@@ -19,8 +19,9 @@ e2e/
 ├── path_modules/        no workspace: app/ -> path: packages/feature/ -> ffo_probe
 ├── melos6/              melos 6, no workspace: app/ -> feature (linked by melos) -> ffo_probe
 └── tool/
-    ├── verify.sh            builds a fixture and checks the plugin's footprint
-    └── add_ios_flavors.rb   adds the iOS flavor configurations and schemes
+    ├── verify.sh              builds a fixture and checks the plugin's footprint
+    ├── smoke_min_flutter.sh   pub-level smoke test on the oldest supported Flutter
+    └── add_ios_flavors.rb     adds the iOS flavor configurations and schemes
 ```
 
 The package that depends on `ffo_probe` declares the override for `prod`, with
@@ -135,6 +136,36 @@ script runs it when `.dart_tool/package_config.json` is missing. Android: an
 Android SDK (`$ANDROID_HOME`, `$ANDROID_SDK_ROOT`, `~/Library/Android/sdk` or
 `~/Android/Sdk`) with build-tools that have `dexdump` and `aapt2`. iOS: macOS
 with Xcode and CocoaPods.
+
+## Oldest supported Flutter
+
+The fixtures come from the templates of Flutter 3.44, which older Flutter
+releases cannot build. `tool/smoke_min_flutter.sh` covers the oldest one the
+CLI supports, Flutter 3.22 (Dart 3.4), without a native build:
+
+```bash
+e2e/tool/smoke_min_flutter.sh [--keep]
+```
+
+With the Flutter on `PATH`, it creates an Android app in a temporary
+directory next to copies of `plugins/` and `stubs/`, makes it depend on
+`ffo_probe` with a `prod` override to the stub, and runs the CLI on that
+Flutter's Dart (as a path dependency of a throwaway package: the repository's
+own dev dependencies need a newer SDK). After `--flavor prod` and `flutter pub
+get`, `package_config.json` points `ffo_probe` at the stub and neither
+`.flutter-plugins-dependencies` nor `GeneratedPluginRegistrant.java` has the
+plugin; after `--flavor dev`, the overrides file is gone and all three have it
+again. That is the part that depends on the Flutter version: the native build
+only consumes Flutter's plugin list. The plugin and the stub accept Dart 3.4
+for this.
+
+## CI
+
+`.github/workflows/e2e.yml` runs on every push to `main` and every pull
+request, on Flutter 3.44.8: `verify.sh <fixture> android dev` and `prod` for
+all four fixtures on Linux, `ios-cocoapods` and `ios-spm` for the other three
+on macOS, and the smoke test on Flutter 3.22.3. `verify.sh` runs on macOS and
+Linux alike.
 
 ## Fixture notes
 

@@ -1,0 +1,107 @@
+name: e2e
+
+# Real Flutter builds of the fixtures in e2e/, driven by the CLI: the plugin's
+# native code must be in the dev build and out of the prod one. See
+# e2e/README.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Explicit, so steps run as `bash --noprofile --norc -eo pipefail`.
+    shell: bash
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: android / ${{ matrix.structure }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        structure: [single, workspace, path_modules, melos6]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # Pinned: the fixtures come from this version's templates. Raise it
+          # deliberately, together with the fixtures.
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+
+      # verify.sh runs the CLI from this checkout.
+      - name: pub get
+        run: dart pub get
+
+      - name: dev
+        run: e2e/tool/verify.sh ${{ matrix.structure }} android dev
+
+      - name: prod
+        if: success() || failure()
+        run: e2e/tool/verify.sh ${{ matrix.structure }} android prod
+
+  ios:
+    name: ${{ matrix.mechanism }} / ${{ matrix.structure }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        structure: [single, workspace, path_modules]
+        mechanism: [ios-cocoapods, ios-spm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+
+      - name: pub get
+        run: dart pub get
+
+      - name: dev
+        run: e2e/tool/verify.sh ${{ matrix.structure }} ${{ matrix.mechanism }} dev
+
+      - name: prod
+        if: success() || failure()
+        run: e2e/tool/verify.sh ${{ matrix.structure }} ${{ matrix.mechanism }} prod
+
+  min-flutter-smoke:
+    name: smoke on the minimum Flutter (3.22.3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          # The last patch of the oldest Flutter whose Dart (3.4) the CLI
+          # supports.
+          flutter-version: 3.22.3
+          channel: stable
+          cache: true
+
+      - name: smoke
+        run: e2e/tool/smoke_min_flutter.sh

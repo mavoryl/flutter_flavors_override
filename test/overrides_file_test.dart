@@ -419,6 +419,48 @@ void main() {
     });
   });
 
+  group('a file without a final newline', () {
+    const files = {
+      'foreign entries': 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core',
+      'a melos 6 file': '# melos_managed_dependency_overrides: core\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core',
+      'a comment only': '# dependency_overrides:',
+      'another top-level key': 'other_key: 1',
+      'a trailing comment': 'dependency_overrides:\n'
+          '  core: 1.0.0\n'
+          '# trailing note',
+      'a flow section': 'dependency_overrides: {core: {path: ../core}}',
+    };
+
+    files.forEach((name, original) {
+      test('$name: comes back byte for byte when ours are removed', () {
+        final added = merge(original, probe)!;
+        expect(added, contains('ffo_probe'));
+        expect(merge(added, probe), added);
+        expect(merge(added, {}), original);
+
+        final replaced = merge(added, {'other': '2.0.0'})!;
+        expect(replaced, isNot(contains('ffo_probe')));
+        expect(merge(replaced, {}), original);
+      });
+    });
+
+    test('adding ours puts a line break before them', () {
+      expect(
+        merge('# note', probe),
+        '# note\n'
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe',
+      );
+    });
+  });
+
   group('an empty dependency_overrides section', () {
     test('is no content: the pubspec overrides are copied, block style', () {
       const empty = 'dependency_overrides: {}\n';

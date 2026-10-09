@@ -16,6 +16,8 @@ const markerPrefix = '# flutter_flavor_overrides:';
 /// entry for a [desired] package is an error naming [filePath]. When nothing
 /// foreign is left in the YAML, [pubspecOverrides] are copied in as ours: the
 /// file replaces the pubspec's `dependency_overrides` as a whole (T4).
+/// A file without a final line break keeps having none, so that removing our
+/// entries gives back its text byte for byte.
 String? mergeOverrides({
   required String? existing,
   required Map<String, Object?> desired,
@@ -65,7 +67,7 @@ String? mergeOverrides({
       text = _cutEmptySection(text)?.text ?? text;
     }
     text = _setMarker(text, null);
-    return text.trim().isEmpty ? null : text;
+    return text.trim().isEmpty ? null : _endLike(existing, text);
   }
 
   // 3. No foreign entries and no other keys: this file replaces the pubspec's
@@ -100,7 +102,23 @@ String? mergeOverrides({
       }
     }
   }
-  return _setMarker(text, '$markerPrefix ${entries.keys.join(',')}');
+  return _endLike(
+    existing,
+    _setMarker(text, '$markerPrefix ${entries.keys.join(',')}'),
+  );
+}
+
+/// [text] without its final line break when [existing] has text but no final
+/// line break. Ours then end the file without one, and cutting them leaves
+/// the line break before them, which this takes away again.
+String _endLike(String? existing, String text) {
+  if (existing == null ||
+      existing.isEmpty ||
+      existing.endsWith('\n') ||
+      !text.endsWith('\n')) {
+    return text;
+  }
+  return text.substring(0, text.length - 1);
 }
 
 /// The marker comment line of a file.

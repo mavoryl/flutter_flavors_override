@@ -18,7 +18,8 @@ class LocalPackage {
     this.flavorOverrides = const {},
   }) : dir = p.normalize(p.absolute(dir));
 
-  /// Absolute, normalized directory of the package.
+  /// Absolute, normalized directory of the package; [load] also resolves
+  /// symbolic links.
   final String dir;
 
   final String name;
@@ -44,7 +45,7 @@ class LocalPackage {
   /// file when it is missing, is not valid YAML, has no string `name`, or when
   /// a dependency section, `flavor_overrides` or a flavor entry is not a map.
   static LocalPackage load(String dir) {
-    final normalized = p.normalize(p.absolute(dir));
+    final normalized = canonicalDir(dir);
     final pubspecPath = p.join(normalized, 'pubspec.yaml');
     if (!File(pubspecPath).existsSync()) {
       throw FlavorOverridesException('$pubspecPath: not found.');
@@ -91,6 +92,15 @@ class LocalPackage {
       },
     );
   }
+}
+
+/// [dir] absolute and normalized, symbolic links resolved when it exists: one
+/// package reached through two paths has one canonical dir.
+String canonicalDir(String dir) {
+  final normalized = p.normalize(p.absolute(dir));
+  final directory = Directory(normalized);
+  if (!directory.existsSync()) return normalized;
+  return p.normalize(directory.resolveSymbolicLinksSync());
 }
 
 /// Reads the YAML file at [path] as plain Dart values. Throws

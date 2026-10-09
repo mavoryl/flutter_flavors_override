@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_flavor_overrides/src/errors.dart';
 import 'package:flutter_flavor_overrides/src/project.dart';
 import 'package:test/test.dart';
@@ -371,6 +373,96 @@ workspace:
       expect(result.reachableFrom(app), {app, feature});
     });
   });
+
+  group('an invalid glob is an error naming the file and the pattern', () {
+    test('in workspace:', () {
+      final root = project.pubspec('.', '''
+name: root
+workspace:
+  - packages/[
+''');
+
+      expect(
+        () => Project.discover(root),
+        throwsAbout([project.path('pubspec.yaml'), 'packages/[']),
+      );
+    });
+
+    test('in melos.yaml packages:', () {
+      final root = project.pubspec('.', 'name: root\n');
+      project.file('melos.yaml', 'name: root\npackages:\n  - packages/[\n');
+
+      expect(
+        () => Project.discover(root),
+        throwsAbout([project.path('melos.yaml'), 'packages/[']),
+      );
+    });
+  });
+
+  group('symbolic links', () {
+    test('a package reached through an alias is one package', () {
+      final app = project.pubspec('app', '''
+name: app
+dependencies:
+  a:
+    path: ../a
+  b:
+    path: ../b
+''');
+      project.pubspec(
+          'a', 'name: a\ndependencies:\n  core:\n    path: ../core\n');
+      project.pubspec('b', '''
+name: b
+dependencies:
+  core:
+    path: ../links/core_alias
+''');
+      final core = project.pubspec('core', 'name: core\n');
+      project.link('links/core_alias', '../core');
+
+      final result = Project.discover(app);
+
+      expect(result.packages.keys,
+          unorderedEquals(dirs(['app', 'a', 'b', 'core'])));
+      expect(result.localDependencies(project.path('b'), resolving: false),
+          [core]);
+      expect(
+        result.reachableFrom(project.path('links/core_alias')),
+        {core},
+      );
+    });
+
+    test('a path: link back to the package itself terminates', () {
+      final app = project.pubspec('app', '''
+name: app
+dependencies:
+  mirror:
+    path: link
+''');
+      project.link('app/link', '.');
+
+      final result = Project.discover(app);
+
+      expect(result.packages.keys, [app]);
+    });
+
+    test('a directory link cycle under a ** glob terminates', () {
+      final root = project.pubspec('.', '''
+name: root
+workspace:
+  - packages/**
+''');
+      final a = project.pubspec(
+        'packages/a',
+        'name: a\nresolution: workspace\n',
+      );
+      project.link('packages/a/loop', '..');
+
+      final result = Project.discover(root);
+
+      expect(result.members, {root, a});
+    }, timeout: const Timeout(Duration(seconds: 20)));
+  }, skip: Platform.isWindows ? 'symbolic links need privileges' : false);
 
   group('melos packages without a workspace', () {
     late String root;

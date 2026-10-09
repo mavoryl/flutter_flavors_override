@@ -1,6 +1,7 @@
 import 'package:path/path.dart' as p;
 
 import 'errors.dart';
+import 'local_package.dart' show canonicalDir;
 import 'project.dart';
 
 /// One package to override in a pubspec_overrides.yaml.
@@ -30,7 +31,7 @@ List<Declaration> declarationsFor(
   String targetDir,
   String flavor,
 ) {
-  final target = p.normalize(p.absolute(targetDir));
+  final target = canonicalDir(targetDir);
   final sourceDirs = switch (project.mode) {
     ProjectMode.workspace => project.packages.keys,
     ProjectMode.packages => project.reachableFrom(target),

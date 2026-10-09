@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_flavor_overrides/src/declarations.dart';
 import 'package:flutter_flavor_overrides/src/errors.dart';
 import 'package:flutter_flavor_overrides/src/project.dart';
@@ -261,6 +263,42 @@ flavor_overrides:
         },
       ]);
     });
+
+    test('a package reached through a symbolic link declares once', () {
+      project.pubspec('app', '''
+name: app
+dependencies:
+  a:
+    path: ../a
+  b:
+    path: ../b
+''');
+      project.pubspec(
+          'a', 'name: a\ndependencies:\n  core:\n    path: ../core\n');
+      project.pubspec('b', '''
+name: b
+dependencies:
+  core:
+    path: ../links/core_alias
+''');
+      project.pubspec('core', '''
+name: core
+flavor_overrides:
+  prod:
+    some_plugin:
+      path: ../stubs/some_plugin
+''');
+      project.link('links/core_alias', '../core');
+      final result = Project.discover(project.path('app'));
+
+      expect(describe(declarationsFor(result, project.path('app'), 'prod')), [
+        {
+          'package': 'some_plugin',
+          'spec': {'path': '../stubs/some_plugin'},
+          'sources': [project.path('core/pubspec.yaml')],
+        },
+      ]);
+    }, skip: Platform.isWindows ? 'symbolic links need privileges' : false);
 
     test('different declarations for one package are an error', () {
       appWithFeature(appExtra: '''

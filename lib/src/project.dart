@@ -83,7 +83,7 @@ class Project {
   }
 
   LocalPackage _package(String dir) {
-    final package = packages[p.normalize(p.absolute(dir))];
+    final package = packages[canonicalDir(dir)];
     if (package == null) {
       throw ArgumentError.value(dir, 'dir', 'Not a local package');
     }
@@ -94,7 +94,7 @@ class Project {
   /// `resolution: workspace`, walk up to the nearest ancestor whose expanded
   /// `workspace:` contains it; error if none.
   static Project discover(String startDir) {
-    var root = LocalPackage.load(p.normalize(p.absolute(startDir)));
+    var root = LocalPackage.load(startDir);
     // A root can itself be a member of an outer workspace.
     while (root.inWorkspace) {
       root = _workspaceRoot(root);
@@ -178,10 +178,10 @@ class Project {
     final dirs = <String>{};
     for (final entry in root.workspace!) {
       if (_isGlob(entry)) {
-        dirs.addAll(_globPackageDirs(entry, root.dir));
+        dirs.addAll(_globPackageDirs(entry, root.dir, root.pubspecPath));
         continue;
       }
-      final dir = p.normalize(p.join(root.dir, entry));
+      final dir = canonicalDir(p.join(root.dir, entry));
       if (!_hasPubspec(dir)) {
         throw FlavorOverridesException(
           '${root.pubspecPath}: workspace entry `$entry` points to $dir, '
@@ -207,7 +207,7 @@ class Project {
     }
     return {
       for (final pattern in patterns.cast<String>())
-        for (final dir in _globPackageDirs(pattern, rootDir))
+        for (final dir in _globPackageDirs(pattern, rootDir, path))
           dir: LocalPackage.load(dir),
     };
   }
@@ -215,11 +215,31 @@ class Project {
   static bool _isGlob(String entry) => entry.contains(RegExp(r'[*?[{]'));
 
   /// Directories under [rootDir] that match [pattern] and have pubspec.yaml.
-  static List<String> _globPackageDirs(String pattern, String rootDir) => [
-        for (final entity in Glob(pattern).listSync(root: rootDir))
-          if (entity is Directory && _hasPubspec(entity.path))
-            p.normalize(entity.path),
-      ];
+  /// Links are not followed into, so a link cycle cannot loop; a matching
+  /// link to a directory counts.
+  /// [source] is the file the pattern comes from, for errors.
+  static List<String> _globPackageDirs(
+    String pattern,
+    String rootDir,
+    String source,
+  ) {
+    final Glob glob;
+    try {
+      glob = Glob(pattern);
+    } on FormatException catch (e) {
+      throw FlavorOverridesException(
+        '$source: `$pattern` is not a valid glob: ${e.message}',
+      );
+    }
+    return [
+      for (final entity in glob.listSync(root: rootDir, followLinks: false))
+        if ((entity is Directory ||
+                (entity is Link &&
+                    FileSystemEntity.isDirectorySync(entity.path))) &&
+            _hasPubspec(entity.path))
+          canonicalDir(entity.path),
+    ];
+  }
 
   static bool _hasPubspec(String dir) =>
       File(p.join(dir, 'pubspec.yaml')).existsSync();
@@ -283,7 +303,7 @@ class Project {
       if (spec is Map<String, Object?> && spec.containsKey('path')) {
         final path = spec['path'];
         if (path is String) {
-          edges.add((name: name, dir: p.normalize(p.join(package.dir, path))));
+          edges.add((name: name, dir: canonicalDir(p.join(package.dir, path))));
         }
         return;
       }

@@ -37,5 +37,13 @@ class ProjectBuilder {
     return path(relativeDir);
   }
 
+  /// Creates a symbolic link at [relative] pointing to [target], as written.
+  String link(String relative, String target) {
+    final link = Link(path(relative));
+    link.parent.createSync(recursive: true);
+    link.createSync(target);
+    return link.path;
+  }
+
   void delete() => Directory(root).deleteSync(recursive: true);
 }

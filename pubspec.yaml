@@ -4,6 +4,8 @@ description: >-
   pubspec_overrides.yaml, so a plugin's native code stays out of flavors that
   don't need it.
 version: 0.0.1
+repository: https://github.com/mavoryl/flutter_flavors_override
+issue_tracker: https://github.com/mavoryl/flutter_flavors_override/issues
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

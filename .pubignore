@@ -22,3 +22,10 @@ CLAUDE.md
 pubspec.lock
 /doc/api/
 /coverage/
+
+# CI plumbing.
+.github/
+
+# Consumers get the package, not our test suite: pana awards nothing for shipping
+# tests. Root-anchored on purpose.
+/test/

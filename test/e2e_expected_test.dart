@@ -59,7 +59,14 @@ void main() {
           err: err,
         );
 
-        expect(err.toString(), isEmpty);
+        // The fixtures declare prod only; the CLI notes that dev has nothing.
+        expect(
+          err.toString(),
+          flavor == 'prod'
+              ? isEmpty
+              : 'flutter_flavor_overrides: no flavor_overrides for flavor '
+                  '`$flavor` in this project\n',
+        );
         expect(code, 0, reason: out.toString());
         expect(
           _overridesFiles(copy),

@@ -463,6 +463,70 @@ flavor_overrides:
     });
   });
 
+  group('a flavor without flavor_overrides anywhere in the project', () {
+    const note = 'flutter_flavor_overrides: no flavor_overrides for flavor '
+        '`prdo` in this project\n';
+
+    test('is noted on stderr; our entries still go', () async {
+      singlePackage();
+      await cli(['--flavor', 'prod'], dir: 'app');
+
+      final result = await cli(['--flavor', 'prdo'], dir: 'app');
+
+      expect(result.code, 0);
+      expect(result.err, note);
+      expect(result.out, 'removed pubspec_overrides.yaml\n');
+      expect(read('app/pubspec_overrides.yaml'), isNull);
+    });
+
+    test('is noted with --dry-run and --list-dependents too', () async {
+      singlePackage();
+
+      final dryRun = await cli(['--flavor', 'prdo', '--dry-run'], dir: 'app');
+      expect(dryRun.code, 0);
+      expect(dryRun.err, note);
+      expect(dryRun.out, 'up to date\n');
+
+      final listed = await cli(
+        ['--flavor', 'prdo', '--list-dependents'],
+        dir: 'app',
+      );
+      expect(listed.code, 0);
+      expect(listed.err, note);
+      expect(listed.out, isEmpty);
+    });
+
+    test('a flavor declared with no entries is not noted', () async {
+      project.pubspec('app', '''
+name: app
+flavor_overrides:
+  prdo:
+''');
+
+      final result = await cli(['--flavor', 'prdo'], dir: 'app');
+
+      expect(result.err, isEmpty);
+      expect(result.out, 'up to date\n');
+    });
+
+    test('a flavor declared in another package is not noted', () async {
+      project.pubspec('.', 'name: root\nworkspace:\n  - a\n  - b\n');
+      project.pubspec('a', 'name: a\nresolution: workspace\n');
+      project.pubspec('b', '''
+name: b
+resolution: workspace
+flavor_overrides:
+  prdo:
+    ffo_probe: 1.0.0
+''');
+
+      final result = await cli(['--flavor', 'prdo'], dir: 'a');
+
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+    });
+  });
+
   group('--clean', () {
     test('removes our entries and keeps what melos merged in', () async {
       singlePackage();

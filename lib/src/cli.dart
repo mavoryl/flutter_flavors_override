@@ -111,6 +111,14 @@ Future<int> run(
     for (final warning in project.warnings) {
       errors.writeln('$_name: warning: $warning');
     }
+    // Most likely a typo in --flavor; still a valid run, which removes ours.
+    if (flavor != null &&
+        !project.packages.values
+            .any((package) => package.flavorOverrides.containsKey(flavor))) {
+      errors.writeln(
+        '$_name: no flavor_overrides for flavor `$flavor` in this project',
+      );
+    }
     String relative(String path) => _relative(path, from: start);
 
     if (listDependents) {

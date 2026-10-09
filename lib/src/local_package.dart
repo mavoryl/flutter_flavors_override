@@ -99,12 +99,17 @@ Object? readYamlFile(String path) {
   try {
     return toPlain(loadYaml(File(path).readAsStringSync()));
   } on YamlException catch (e) {
-    final start = e.span?.start;
-    final where = start == null
-        ? ''
-        : ' (line ${start.line + 1}, column ${start.column + 1})';
-    throw FlavorOverridesException('$path: not valid YAML: ${e.message}$where');
+    throw FlavorOverridesException(
+      '$path: not valid YAML: ${describeYamlException(e)}',
+    );
   }
+}
+
+/// The message of [e] with its line and column, 1-based.
+String describeYamlException(YamlException e) {
+  final start = e.span?.start;
+  if (start == null) return e.message;
+  return '${e.message} (line ${start.line + 1}, column ${start.column + 1})';
 }
 
 /// Converts a parsed YAML value to plain Dart values.

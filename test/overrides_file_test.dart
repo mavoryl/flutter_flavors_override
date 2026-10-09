@@ -1,0 +1,346 @@
+import 'package:flutter_flavor_overrides/src/errors.dart';
+import 'package:flutter_flavor_overrides/src/overrides_file.dart';
+import 'package:test/test.dart';
+
+const filePath = '/project/app/pubspec_overrides.yaml';
+
+const probe = {
+  'ffo_probe': {'path': '../stubs/ffo_probe'},
+};
+
+/// The plan's reference output for [probe].
+const probeFile = '# flutter_flavor_overrides: ffo_probe\n'
+    'dependency_overrides:\n'
+    '  ffo_probe:\n'
+    '    path: ../stubs/ffo_probe\n';
+
+String? merge(
+  String? existing,
+  Map<String, Object?> desired, {
+  Map<String, Object?> pubspecOverrides = const {},
+}) =>
+    mergeOverrides(
+      existing: existing,
+      desired: desired,
+      pubspecOverrides: pubspecOverrides,
+      filePath: filePath,
+    );
+
+void main() {
+  group('a new file', () {
+    test('is exactly the reference file', () {
+      expect(merge(null, probe), probeFile);
+    });
+
+    test('lists several packages sorted by name, any spec', () {
+      expect(
+        merge(null, {
+          'zeta': '^1.0.0',
+          'alpha': {
+            'git': {'url': 'https://example.com/alpha.git', 'ref': 'main'},
+          },
+          'mid': null,
+        }),
+        '# flutter_flavor_overrides: alpha,mid,zeta\n'
+        'dependency_overrides:\n'
+        '  alpha:\n'
+        '    git:\n'
+        '      url: https://example.com/alpha.git\n'
+        '      ref: main\n'
+        '  mid: null\n'
+        '  zeta: ^1.0.0\n',
+      );
+    });
+
+    test('is not created without desired entries', () {
+      expect(merge(null, {}), isNull);
+    });
+  });
+
+  group('our own file', () {
+    test('a re-run with the same entries changes nothing', () {
+      expect(merge(probeFile, probe), probeFile);
+    });
+
+    test('another flavor replaces our entries', () {
+      expect(
+        merge(probeFile, {'other': '2.0.0'}),
+        '# flutter_flavor_overrides: other\n'
+        'dependency_overrides:\n'
+        '  other: 2.0.0\n',
+      );
+    });
+
+    test('is deleted when nothing is desired', () {
+      expect(merge(probeFile, {}), isNull);
+    });
+  });
+
+  group('without our entries and nothing desired', () {
+    test('a foreign file is returned as is', () {
+      const foreign = '# hand-written\n'
+          'dependency_overrides:\n'
+          '  other: {path: ../other}\n';
+      expect(merge(foreign, {}), same(foreign));
+    });
+
+    test('an empty file is returned as is', () {
+      expect(merge('', {}), '');
+    });
+  });
+
+  group('a melos 6 file', () {
+    const melosFile = '# melos_managed_dependency_overrides: core,feature\n'
+        '# linked by melos bootstrap\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  # the feature module\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n';
+
+    const withProbe = '# melos_managed_dependency_overrides: core,feature\n'
+        '# linked by melos bootstrap\n'
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  # the feature module\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n';
+
+    test('gets our entry and our marker after its leading comments', () {
+      expect(merge(melosFile, probe), withProbe);
+    });
+
+    test('a re-run changes nothing', () {
+      expect(merge(withProbe, probe), withProbe);
+    });
+
+    test('another flavor rewrites our marker in place', () {
+      expect(
+        merge(withProbe, {'a_plugin': '1.0.0'}),
+        '# melos_managed_dependency_overrides: core,feature\n'
+        '# linked by melos bootstrap\n'
+        '# flutter_flavor_overrides: a_plugin\n'
+        'dependency_overrides:\n'
+        '  a_plugin: 1.0.0\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  # the feature module\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n',
+      );
+    });
+
+    test('removing ours restores the melos file byte for byte', () {
+      expect(merge(withProbe, {}), melosFile);
+      expect(merge(merge(withProbe, {'a_plugin': '1.0.0'}), {}), melosFile);
+    });
+
+    test('melos merged into our file: removing ours keeps melos entries', () {
+      const merged = '# melos_managed_dependency_overrides: core\n'
+          '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n';
+
+      expect(merge(merged, probe), merged);
+      expect(
+        merge(merged, {}),
+        '# melos_managed_dependency_overrides: core\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n',
+      );
+    });
+  });
+
+  group("the pubspec's dependency_overrides", () {
+    const pubspecOverrides = {
+      'other': {'path': '../vendor/other'},
+    };
+    const probeWithOther = '# flutter_flavor_overrides: ffo_probe,other\n'
+        'dependency_overrides:\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n'
+        '  other:\n'
+        '    path: ../vendor/other\n';
+
+    test('are copied into a new file and marked as ours', () {
+      expect(
+        merge(null, probe, pubspecOverrides: pubspecOverrides),
+        probeWithOther,
+      );
+    });
+
+    test('are copied again on a re-run over our own file', () {
+      expect(
+        merge(probeWithOther, probe, pubspecOverrides: pubspecOverrides),
+        probeWithOther,
+      );
+      expect(
+        merge(probeFile, probe, pubspecOverrides: pubspecOverrides),
+        probeWithOther,
+      );
+    });
+
+    test('are copied into a file with only comments, which stay', () {
+      expect(
+        merge('# local notes\n', probe, pubspecOverrides: pubspecOverrides),
+        '# local notes\n$probeWithOther',
+      );
+    });
+
+    test('lose to a desired entry for the same package', () {
+      expect(
+        merge(null, probe, pubspecOverrides: {
+          'ffo_probe': '1.0.0',
+          ...pubspecOverrides,
+        }),
+        probeWithOther,
+      );
+    });
+
+    test('are not copied next to foreign entries', () {
+      const foreign = 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n';
+
+      expect(
+        merge(foreign, probe, pubspecOverrides: pubspecOverrides),
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+    });
+
+    test('are not copied when nothing is desired', () {
+      expect(merge(null, {}, pubspecOverrides: pubspecOverrides), isNull);
+      expect(merge(probeWithOther, {}, pubspecOverrides: pubspecOverrides),
+          isNull);
+    });
+  });
+
+  group('foreign content', () {
+    test('other top-level keys and comments are kept', () {
+      const foreign = '# keep me\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          'other_key: 1\n';
+      const withProbe = '# keep me\n'
+          '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          'other_key: 1\n';
+
+      expect(merge(foreign, probe), withProbe);
+      expect(merge(withProbe, probe), withProbe);
+      expect(merge(withProbe, {}), foreign);
+    });
+
+    test('a file without dependency_overrides gets the section', () {
+      const foreign = 'other_key: 1\n';
+      const withProbe = '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          'other_key: 1\n';
+
+      expect(merge(foreign, probe), withProbe);
+      expect(merge(withProbe, probe), withProbe);
+      expect(merge(withProbe, {}), foreign);
+    });
+
+    test('the marker is found on any line and rewritten there', () {
+      const markerLast = 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          '# flutter_flavor_overrides: ffo_probe\n';
+
+      expect(merge(markerLast, probe), markerLast);
+      expect(
+        merge(markerLast, {'a_plugin': '1.0.0'}),
+        'dependency_overrides:\n'
+        '  a_plugin: 1.0.0\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '# flutter_flavor_overrides: a_plugin\n',
+      );
+      expect(
+        merge(markerLast, {}),
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n',
+      );
+    });
+
+    test('a marker with spaces after commas is read', () {
+      const spaced = '# flutter_flavor_overrides: ffo_probe, other\n'
+          'dependency_overrides:\n'
+          '  core: 1.0.0\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          '  other: 2.0.0\n';
+
+      expect(
+        merge(spaced, probe),
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core: 1.0.0\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+    });
+  });
+
+  group('errors name the file', () {
+    Matcher throwsAbout(String detail) => throwsA(
+          isA<FlavorOverridesException>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains(filePath), contains(detail)),
+          ),
+        );
+
+    test('a foreign entry for a desired package', () {
+      const foreign = '# melos_managed_dependency_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../packages/ffo_probe\n';
+
+      expect(() => merge(foreign, probe), throwsAbout('ffo_probe'));
+    });
+
+    test('invalid YAML', () {
+      expect(
+        () => merge('dependency_overrides: [a\n', probe),
+        throwsAbout('not valid YAML'),
+      );
+    });
+
+    test('not a map at the top level', () {
+      expect(() => merge('- a\n', probe), throwsAbout('must be a map'));
+    });
+
+    test('dependency_overrides is not a map', () {
+      expect(
+        () => merge('dependency_overrides: [a]\n', probe),
+        throwsAbout('`dependency_overrides`'),
+      );
+    });
+  });
+}

@@ -1,0 +1,13 @@
+name: melos6_root
+description: >-
+  Root of the melos6 fixture of the flutter_flavor_overrides e2e suite: melos 6
+  without a pub workspace, so `melos bootstrap` links the local packages
+  through their pubspec_overrides.yaml.
+publish_to: none
+
+environment:
+  sdk: ^3.12.2
+
+dev_dependencies:
+  # Run as `dart run melos`, never activated globally.
+  melos: 6.3.3

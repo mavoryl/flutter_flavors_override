@@ -1,0 +1,9 @@
+name: melos6
+
+packages:
+  - app
+  - packages/*
+
+ide:
+  intellij:
+    enabled: false

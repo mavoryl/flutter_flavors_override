@@ -22,8 +22,8 @@ String? mergeOverrides({
   required Map<String, Object?> pubspecOverrides,
   required String filePath,
 }) {
+  if (existing != null) _validate(existing, filePath);
   var text = existing ?? '';
-  _validate(text, filePath);
   final marker = _Marker.find(text);
 
   // 1. Remove our entries, each with its own lines only: yaml_edit would also
@@ -171,19 +171,44 @@ String _setMarker(String text, String? line) {
 }
 
 /// Throws unless [text] is empty or a map whose `dependency_overrides`, if
-/// any, is a map.
+/// any, is a map. Also throws on YAML that is valid but that the line-based
+/// editing here would corrupt.
 void _validate(String text, String filePath) {
-  final YamlNode root;
+  final List<YamlDocument> documents;
   try {
-    root = loadYamlNode(text);
+    documents = loadYamlDocuments(text);
   } on YamlException catch (e) {
     throw FlavorOverridesException(
       '$filePath: not valid YAML: ${describeYamlException(e)}',
     );
   }
-  if (root.value == null) return;
+  if (documents.length > 1) {
+    throw FlavorOverridesException(
+      '$filePath: more than one YAML document is not supported. Keep a single '
+      'document.',
+    );
+  }
+  if (_documentEnd.hasMatch(text)) {
+    throw FlavorOverridesException(
+      '$filePath: the document end marker `...` is not supported. Remove it.',
+    );
+  }
+  final root = documents.firstOrNull?.contents;
+  if (root == null || root.value == null) return;
   if (root is! YamlMap) {
     throw FlavorOverridesException('$filePath: must be a map.');
+  }
+  if (_hasAnchorOrAlias(root)) {
+    throw FlavorOverridesException(
+      '$filePath: YAML anchors and aliases (`&name`, `*name`) are not '
+      'supported. Write the values out instead.',
+    );
+  }
+  if (_isIndented(text, root)) {
+    throw FlavorOverridesException(
+      '$filePath: an indented top-level map is not supported. Start its keys '
+      'at column 0.',
+    );
   }
   final section = root.nodes['dependency_overrides'];
   if (section != null && section.value != null && section is! YamlMap) {
@@ -191,6 +216,39 @@ void _validate(String text, String filePath) {
       '$filePath: `dependency_overrides` must be a map.',
     );
   }
+}
+
+/// A document end marker line. At column 0 and followed by a blank, `...`
+/// ends the document in any context, so in YAML that loads it is nothing
+/// else. Matched in the text: comments and `...` alone load as no document.
+final _documentEnd = RegExp(r'^\.\.\.(?=[ \t\r]|$)', multiLine: true);
+
+/// Whether a node of [root] has an anchor or is an alias. An anchor is a node
+/// property, so the node's span starts with it, after a tag if any: no scalar
+/// starts with `&` or `!`. An alias is the anchored node itself, met again.
+bool _hasAnchorOrAlias(YamlNode root) {
+  final seen = Set<YamlNode>.identity();
+  bool visit(YamlNode node) =>
+      !seen.add(node) ||
+      _anchorProperty.hasMatch(node.span.text) ||
+      switch (node) {
+        YamlMap() => node.nodes.entries
+            .any((entry) => visit(entry.key as YamlNode) || visit(entry.value)),
+        YamlList() => node.nodes.any(visit),
+        _ => false,
+      };
+  return visit(root);
+}
+
+/// An anchor at the start of a node, after an optional tag.
+final _anchorProperty = RegExp(r'^(!\S*\s+)?&');
+
+/// Whether the keys of the block map [root] are indented. They share the
+/// indentation of the line of the first key, where a `?` may precede it.
+bool _isIndented(String text, YamlMap root) {
+  if (root.style != CollectionStyle.BLOCK || root.isEmpty) return false;
+  final key = (root.nodes.keys.first as YamlNode).span.start;
+  return text.startsWith(' ', key.offset - key.column);
 }
 
 /// The `dependency_overrides` node of [text], or null when there is none.

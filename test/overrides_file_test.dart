@@ -288,6 +288,48 @@ void main() {
       );
     });
 
+    test('a leading document start marker stays where it is', () {
+      const otherKey = '---\n'
+          'other_key: 1\n';
+      const otherKeyWithProbe = '# flutter_flavor_overrides: ffo_probe\n'
+          '---\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          'other_key: 1\n';
+      const foreignEntry = '---\n'
+          'dependency_overrides:\n'
+          '  core: 1.0.0\n';
+      const foreignEntryWithProbe = '# flutter_flavor_overrides: ffo_probe\n'
+          '---\n'
+          'dependency_overrides:\n'
+          '  core: 1.0.0\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n';
+
+      expect(merge(otherKey, probe), otherKeyWithProbe);
+      expect(merge(otherKeyWithProbe, probe), otherKeyWithProbe);
+      expect(merge(otherKeyWithProbe, {}), otherKey);
+      expect(merge(foreignEntry, probe), foreignEntryWithProbe);
+      expect(merge(foreignEntryWithProbe, probe), foreignEntryWithProbe);
+      expect(merge(foreignEntryWithProbe, {}), foreignEntry);
+    });
+
+    test('& and * in a quoted string or a plain scalar are no anchors', () {
+      const foreign = 'notes: "&x *y"\n'
+          'other_key: a*b\n';
+      const withProbe = '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          'notes: "&x *y"\n'
+          'other_key: a*b\n';
+
+      expect(merge(foreign, probe), withProbe);
+      expect(merge(withProbe, probe), withProbe);
+      expect(merge(withProbe, {}), foreign);
+    });
+
     test('a marker with spaces after commas is read', () {
       const spaced = '# flutter_flavor_overrides: ffo_probe, other\n'
           'dependency_overrides:\n'
@@ -435,6 +477,41 @@ void main() {
       expect(
         () => merge('dependency_overrides: [a]\n', probe),
         throwsAbout('`dependency_overrides`'),
+      );
+    });
+
+    test('an alias, which would be cut together with its anchor', () {
+      const aliased = 'base: &k foo\n'
+          'dependency_overrides:\n'
+          '  *k : {path: ../foo}\n';
+
+      expect(() => merge(aliased, probe), throwsAbout('anchors and aliases'));
+      expect(
+        () => merge('# flutter_flavor_overrides: foo\n$aliased', {}),
+        throwsAbout('anchors and aliases'),
+      );
+    });
+
+    test('an anchor without an alias', () {
+      expect(
+        () => merge('base: !!str &k foo\n', probe),
+        throwsAbout('anchors and aliases'),
+      );
+    });
+
+    test('an indented top-level map, which a rewrite would re-nest', () {
+      expect(() => merge('  other_key: 1\n', probe), throwsAbout('indented'));
+    });
+
+    test('a document end marker, after a document or alone', () {
+      expect(() => merge('other_key: 1\n...\n', probe), throwsAbout('`...`'));
+      expect(() => merge('# notes\n...\n', probe), throwsAbout('`...`'));
+    });
+
+    test('more than one document', () {
+      expect(
+        () => merge('other_key: 1\n---\nmore: 2\n', probe),
+        throwsAbout('more than one YAML document'),
       );
     });
   });

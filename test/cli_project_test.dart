@@ -157,7 +157,7 @@ flavor_overrides:
 
     expect(result.err, isEmpty);
     expect(result.code, 0);
-    expect(result.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
+    expect(result.out, 'wrote ../../pubspec_overrides.yaml (ffo_probe)\n');
     expect(
       read('pubspec_overrides.yaml'),
       '# flutter_flavor_overrides: ffo_probe\n'
@@ -166,6 +166,85 @@ flavor_overrides:
       '    path: stubs/ffo_probe\n',
     );
     expect(read('packages/feature/pubspec_overrides.yaml'), isNull);
+  });
+
+  group('paths are printed relative to where the tool runs', () {
+    setUp(() {
+      // ws/ with members a and b; a declares prod, both use the plugin.
+      project.pubspec('ws', 'name: ws\nworkspace:\n  - a\n  - b\n');
+      project.pubspec('ws/a', '''
+name: a
+resolution: workspace
+dependencies:
+  ffo_probe: 1.0.0
+flavor_overrides:
+  prod:
+    ffo_probe:
+      path: ../../stubs/ffo_probe
+''');
+      project.pubspec('ws/b', '''
+name: b
+resolution: workspace
+dependencies:
+  ffo_probe: 1.0.0
+''');
+    });
+
+    test('wrote and removed, run from a member', () async {
+      final wrote = await cli(['--flavor', 'prod'], dir: 'ws/a');
+      expect(wrote.out, 'wrote ../pubspec_overrides.yaml (ffo_probe)\n');
+
+      final removed = await cli(['--flavor', 'dev'], dir: 'ws/a');
+      expect(removed.out, 'removed ../pubspec_overrides.yaml\n');
+    });
+
+    test('a member file removed, run from another member', () async {
+      project.file('ws/b/pubspec_overrides.yaml', probeFile);
+
+      final result = await cli(['--clean'], dir: 'ws/a');
+
+      expect(result.out, 'removed ../b/pubspec_overrides.yaml\n');
+    });
+
+    test('--dry-run headers, run from a member', () async {
+      final result = await cli(['--flavor', 'prod', '--dry-run'], dir: 'ws/a');
+
+      expect(
+        result.out,
+        startsWith('--- ../pubspec_overrides.yaml (would write)\n'),
+      );
+    });
+
+    test('--list-dependents, run from a member, a loop over it works',
+        () async {
+      final result = await cli(
+        ['--flavor', 'prod', '--list-dependents'],
+        dir: 'ws/a',
+      );
+
+      expect(result.out, '.\n../b\n');
+      for (final dir in result.out.trim().split('\n')) {
+        expect(
+          File(project.path('ws/a/$dir/pubspec.yaml')).existsSync(),
+          isTrue,
+          reason: dir,
+        );
+      }
+    });
+
+    test('-C sets where the tool runs, like git -C', () async {
+      final listed = await cli(
+        ['-C', 'ws/b', '--flavor', 'prod', '--list-dependents'],
+      );
+      expect(listed.err, isEmpty);
+      expect(listed.out, '.\n../a\n');
+
+      final wrote = await cli(['-C', 'ws/b', '--flavor', 'prod']);
+      expect(wrote.out, 'wrote ../pubspec_overrides.yaml (ffo_probe)\n');
+
+      final fromRoot = await cli(['--clean', '--dry-run'], dir: 'ws');
+      expect(fromRoot.out, '--- pubspec_overrides.yaml (would remove)\n');
+    });
   });
 
   group('path modules without a workspace', () {
@@ -317,8 +396,8 @@ flavor_overrides:
       expect(result.code, 0);
       expect(
         result.out,
-        'wrote app/pubspec_overrides.yaml (ffo_probe)\n'
-        'wrote packages/feature/pubspec_overrides.yaml (ffo_probe)\n',
+        'wrote pubspec_overrides.yaml (ffo_probe)\n'
+        'wrote ../packages/feature/pubspec_overrides.yaml (ffo_probe)\n',
       );
       expect(read('app/pubspec_overrides.yaml'), probeFile);
       expect(

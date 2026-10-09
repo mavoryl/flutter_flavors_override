@@ -6,7 +6,7 @@ import 'package:yaml/yaml.dart';
 
 import 'declarations.dart';
 import 'errors.dart';
-import 'local_package.dart' show toPlain;
+import 'local_package.dart' show canonicalDir, toPlain;
 import 'overrides_file.dart';
 import 'project.dart';
 
@@ -103,12 +103,15 @@ Future<int> run(
   try {
     final base = workingDirectory ?? Directory.current.path;
     final directory = options.option('directory');
-    final project = Project.discover(
+    // Where the tool runs, after -C: printed paths are relative to it.
+    final start = canonicalDir(
       directory == null ? base : p.join(base, directory),
     );
+    final project = Project.discover(start);
+    String relative(String path) => _relative(path, from: start);
 
     if (listDependents) {
-      _dependents(project, flavor!).forEach(output.writeln);
+      _dependents(project, flavor!, relative).forEach(output.writeln);
       return 0;
     }
 
@@ -121,7 +124,7 @@ Future<int> run(
     }
     final dryRun = options.flag('dry-run');
     for (final change in changes) {
-      final rel = _relative(project, change.path);
+      final rel = relative(change.path);
       final text = change.text;
       if (dryRun) {
         output.write('--- $rel (would ${text == null ? 'remove' : 'write'})\n'
@@ -244,9 +247,13 @@ void _checkMembers(
   }
 }
 
-/// Local packages, relative to the root and sorted, whose dependencies or
+/// Local packages, as [relative] paths, sorted, whose dependencies or
 /// dev_dependencies include a package overridden in [flavor] anywhere.
-List<String> _dependents(Project project, String flavor) {
+List<String> _dependents(
+  Project project,
+  String flavor,
+  String Function(String path) relative,
+) {
   final overridden = {
     for (final package in project.packages.values)
       ...?package.flavorOverrides[flavor]?.keys,
@@ -255,7 +262,7 @@ List<String> _dependents(Project project, String flavor) {
     for (final package in project.packages.values)
       if (package.dependencies.keys.any(overridden.contains) ||
           package.devDependencies.keys.any(overridden.contains))
-        _relative(project, package.dir),
+        relative(package.dir),
   ]..sort();
 }
 
@@ -273,6 +280,6 @@ String? _read(String path) {
   }
 }
 
-/// [path] relative to the project root, with `/`.
-String _relative(Project project, String path) =>
-    p.posix.joinAll(p.split(p.relative(path, from: project.root.dir)));
+/// [path] relative to [from], with `/`; `.` for [from] itself.
+String _relative(String path, {required String from}) =>
+    p.posix.joinAll(p.split(p.relative(path, from: from)));

@@ -1,0 +1,80 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  analyze-and-test:
+    name: analyze + unit tests (Dart 3.12.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          # Pinned, not floating `stable`: dev tooling (test, lints) is pinned to
+          # this SDK. Raise it deliberately, together with those versions.
+          sdk: 3.12.2
+
+      - name: pub get
+        run: dart pub get
+
+      - name: format check
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: analyze
+        run: dart analyze --fatal-infos --fatal-warnings
+
+      - name: unit tests
+        run: dart test
+
+  min-sdk:
+    name: CLI on minimum SDK (Dart 3.4.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: package
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.4.0
+
+      # No `grep -q`: it may exit before `tee` finishes writing, and with
+      # pipefail the resulting SIGPIPE would fail the step.
+      - name: assert SDK version
+        run: |
+          dart --version 2>&1 | tee /dev/stderr | grep 'Dart SDK version: 3.4.0 '
+
+      # The package is a dependency of a throwaway consumer, so pub resolves only
+      # its runtime dependencies: dev tooling needs a newer SDK and is not checked here.
+      - name: create consumer package
+        run: |
+          mkdir consumer
+          cat > consumer/pubspec.yaml <<'EOF'
+          name: consumer
+          environment:
+            sdk: '>=3.4.0 <4.0.0'
+          dependencies:
+            flutter_flavor_overrides:
+              path: ../package
+          EOF
+
+      - name: pub get
+        working-directory: consumer
+        run: dart pub get
+
+      - name: run CLI
+        working-directory: consumer
+        run: |
+          set +e
+          dart run flutter_flavor_overrides --flavor prod 2> stderr.txt
+          code=$?
+          set -e
+          cat stderr.txt
+          # The CLI is a stub until milestone M2: exit code 1, "not implemented yet".
+          test "$code" -eq 1
+          grep -q 'not implemented yet' stderr.txt

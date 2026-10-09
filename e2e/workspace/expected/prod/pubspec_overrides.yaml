@@ -1,0 +1,4 @@
+# flutter_flavor_overrides: ffo_probe
+dependency_overrides:
+  ffo_probe:
+    path: ../stubs/ffo_probe

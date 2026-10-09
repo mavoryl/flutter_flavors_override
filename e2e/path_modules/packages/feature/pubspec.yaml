@@ -1,0 +1,25 @@
+name: feature
+description: >-
+  Feature module of the path_modules fixture (no workspace): the package
+  that depends on ffo_probe and declares its prod override.
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ffo_probe:
+    path: ../../../plugins/ffo_probe
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+# Read by flutter_flavor_overrides, ignored by pub. Paths are relative to this
+# pubspec.
+flavor_overrides:
+  prod:
+    ffo_probe:
+      path: ../../../stubs/ffo_probe

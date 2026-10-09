@@ -1,0 +1,21 @@
+name: path_modules_app
+description: >-
+  App of the path_modules fixture (no workspace) of the flutter_flavor_overrides
+  e2e suite: it reaches ffo_probe through the feature package.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  feature:
+    path: ../packages/feature
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

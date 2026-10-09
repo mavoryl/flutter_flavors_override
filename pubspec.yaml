@@ -6,6 +6,12 @@ description: >-
 version: 1.0.0
 repository: https://github.com/mavoryl/flutter_flavors_override
 issue_tracker: https://github.com/mavoryl/flutter_flavors_override/issues
+topics:
+  - flutter
+  - flavors
+  - cli
+  - dependencies
+  - pubspec
 
 environment:
   sdk: '>=3.4.0 <4.0.0'

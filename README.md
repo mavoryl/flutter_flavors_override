@@ -63,7 +63,8 @@ flavor_overrides:
   reach. Identical declarations in several pubspecs are merged; different specs for one package
   in one flavor are an error that names every pubspec involved.
 - A declaration takes precedence over the same package in that pubspec's own
-  `dependency_overrides`.
+  `dependency_overrides`. In a pub workspace, a member must not override the same package itself:
+  pub refuses a package overridden in two places, so the tool stops with an error instead.
 
 ## Write the stub
 
@@ -125,9 +126,10 @@ what it wrote.
 The tool owns only the entries listed in its marker comment, `# flutter_flavor_overrides: a,b`.
 Everything else in the file — entries written by melos, your own entries, comments — is kept. If
 another entry already overrides a package the tool needs to override, it stops with an error
-naming the file. When the tool creates the file, it copies your pubspec's own
-`dependency_overrides` into it (pub ignores them once `pubspec_overrides.yaml` exists). A file left
-with nothing but what the tool wrote is deleted when the tool removes its entries.
+naming the file. Whenever the tool writes entries, it also carries over your pubspec's own
+`dependency_overrides` (pub ignores them once `pubspec_overrides.yaml` has a `dependency_overrides`
+section), except packages the file already overrides. When the tool removes its entries, the
+file returns to what it was before; a file left with nothing but what the tool wrote is deleted.
 
 ## Options
 
@@ -139,13 +141,14 @@ with nothing but what the tool wrote is deleted when the tool removes its entrie
 | `--list-dependents` | Print the local packages that depend on a package overridden in this flavor; change nothing. |
 | `-C, --directory <dir>` | Run in `<dir>` instead of the current directory. |
 
-Paths in the output are relative to the directory the tool runs in (after `-C`). If no pubspec
+Status lines and `--list-dependents` print paths relative to the directory the tool runs in
+(after `-C`); error messages name files by absolute path. If no pubspec
 in the project declares the selected flavor, the tool says so on stderr — a typo in `--flavor`
 is visible — and still exits `0`.
 
 Exit codes: `0` success, `64` invalid usage, `1` a problem in the project or declarations (the
-message names the file). Every file is planned before any is written, so an error leaves the
-project untouched.
+message names the file). Problems in the project or the declarations are found before any file
+is written, so they leave the project untouched.
 
 ## Check stubs on pull requests
 
@@ -173,8 +176,8 @@ Analyze every dependent, not only the package that declares the override.
 ## How it is tested
 
 Besides unit tests, CI builds real apps through the CLI: a single package, a pub workspace,
-`path:` modules without a workspace and a melos 6 project, on Android and on iOS with both
-CocoaPods and Swift Package Manager, in a flavor with the plugin and one with the stub — and
+`path:` modules without a workspace (on Android and on iOS with both CocoaPods and Swift Package
+Manager) and a melos 6 project (on Android), in a flavor with the plugin and one with the stub — and
 checks that the plugin's native code is present in one build and absent from the other. See
 [`e2e/`](e2e/).
 

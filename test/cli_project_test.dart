@@ -718,6 +718,43 @@ dependency_overrides:
       expect(read('pubspec_overrides.yaml'), isNull);
     });
 
+    test('may override it in a pubspec their own file replaces', () async {
+      project.pubspec('packages/other', '''
+name: other
+resolution: workspace
+dependency_overrides:
+  ffo_probe: 1.0.0
+''');
+      // With the key, pub ignores the pubspec's dependency_overrides.
+      project.file(
+        'packages/other/pubspec_overrides.yaml',
+        'dependency_overrides:\n  core:\n    path: ../core\n',
+      );
+
+      final result = await cli(['--flavor', 'prod']);
+
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+      expect(read('pubspec_overrides.yaml'), contains('stubs/ffo_probe'));
+    });
+
+    test('may not override it in a pubspec their own file leaves in force',
+        () async {
+      project.pubspec('packages/other', '''
+name: other
+resolution: workspace
+dependency_overrides:
+  ffo_probe: 1.0.0
+''');
+      project.file('packages/other/pubspec_overrides.yaml', '# notes\n');
+
+      final result = await cli(['--flavor', 'prod']);
+
+      expect(result.code, 1);
+      expect(result.err, contains(project.path('packages/other/pubspec.yaml')));
+      expect(read('pubspec_overrides.yaml'), isNull);
+    });
+
     test('may not override a package we override, in their own file', () async {
       project.pubspec('packages/other', 'name: other\nresolution: workspace\n');
       project.file(

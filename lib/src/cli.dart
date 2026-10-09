@@ -226,7 +226,9 @@ List<_Change> _plan(Project project, String? flavor) {
 
 /// pub fails when a workspace overrides a package in two files (T5): no member
 /// may override what [rootFile] is about to. [members] maps member dirs to
-/// their planned pubspec_overrides.yaml text.
+/// their planned pubspec_overrides.yaml text. Only the overrides pub applies
+/// count: those of that file when it has `dependency_overrides`, else those
+/// of the member's pubspec.
 void _checkMembers(
   Project project,
   Map<String, String?> members,
@@ -236,23 +238,19 @@ void _checkMembers(
   if (packages.isEmpty) return;
   for (final MapEntry(key: dir, value: text) in members.entries) {
     final member = project.packages[dir]!;
-    final overridesPath = _overridesPath(dir);
     final overridesFile = text == null ? null : toPlain(loadYaml(text));
-    final sources = [
-      (member.pubspecPath, member.dependencyOverrides),
-      if (overridesFile is Map<String, Object?>)
-        (overridesPath, overridesFile['dependency_overrides']),
-    ];
-    for (final (source, overrides) in sources) {
-      if (overrides is! Map<String, Object?>) continue;
-      for (final name in overrides.keys) {
-        if (packages.contains(name)) {
-          throw FlavorOverridesException(
-            '$source overrides `$name`, which $rootFile is to override as '
-            'well; pub does not allow overriding a package in two files of a '
-            'workspace. Remove the override from $source.',
-          );
-        }
+    final (source, overrides) = overridesFile is Map<String, Object?> &&
+            overridesFile.containsKey('dependency_overrides')
+        ? (_overridesPath(dir), overridesFile['dependency_overrides'])
+        : (member.pubspecPath, member.dependencyOverrides);
+    if (overrides is! Map<String, Object?>) continue;
+    for (final name in overrides.keys) {
+      if (packages.contains(name)) {
+        throw FlavorOverridesException(
+          '$source overrides `$name`, which $rootFile is to override as '
+          'well; pub does not allow overriding a package in two files of a '
+          'workspace. Remove the override from $source.',
+        );
       }
     }
   }

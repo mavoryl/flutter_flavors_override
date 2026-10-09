@@ -412,6 +412,57 @@ flavor_overrides:
     });
   });
 
+  group('a path: dependency on a missing directory', () {
+    setUp(() {
+      project.pubspec('app', '''
+name: app
+dependencies:
+  ffo_probe: 1.0.0
+  generated:
+    path: ../generated
+flavor_overrides:
+  prod:
+    ffo_probe:
+      path: ../stubs/ffo_probe
+''');
+    });
+
+    test('is a warning naming the pubspec and the path; the run goes on',
+        () async {
+      final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+      expect(result.code, 0);
+      expect(
+        result.err,
+        'flutter_flavor_overrides: warning: '
+        '${project.path('app/pubspec.yaml')}: dependency `generated` points '
+        'to ${project.path('generated')}, which does not exist; skipped.\n',
+      );
+      expect(result.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
+      expect(read('app/pubspec_overrides.yaml'), probeFile);
+    });
+
+    test('is a warning for --clean as well', () async {
+      await cli(['--flavor', 'prod'], dir: 'app');
+
+      final result = await cli(['--clean'], dir: 'app');
+
+      expect(result.code, 0);
+      expect(result.err, startsWith('flutter_flavor_overrides: warning: '));
+      expect(result.out, 'removed pubspec_overrides.yaml\n');
+    });
+
+    test('a directory without pubspec.yaml stays an error', () async {
+      project.dir('generated');
+
+      final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+      expect(result.code, 1);
+      expect(result.err, startsWith('flutter_flavor_overrides: error: '));
+      expect(read('app/pubspec_overrides.yaml'), isNull);
+    });
+  });
+
   group('--clean', () {
     test('removes our entries and keeps what melos merged in', () async {
       singlePackage();

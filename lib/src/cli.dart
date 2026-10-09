@@ -108,6 +108,9 @@ Future<int> run(
       directory == null ? base : p.join(base, directory),
     );
     final project = Project.discover(start);
+    for (final warning in project.warnings) {
+      errors.writeln('$_name: warning: $warning');
+    }
     String relative(String path) => _relative(path, from: start);
 
     if (listDependents) {

@@ -23,6 +23,7 @@ class Project {
     required this.mode,
     required this.packages,
     required this.members,
+    required this.warnings,
     required Map<String, String> linkedByName,
   }) : _linkedByName = linkedByName;
 
@@ -39,6 +40,10 @@ class Project {
   /// Workspace mode: dirs of the root and every workspace member, nested
   /// workspaces included. Packages mode: empty.
   final Set<String> members;
+
+  /// Problems found that do not stop a run, such as a `path:` dependency on
+  /// a directory that does not exist (yet), whose edge is skipped.
+  final List<String> warnings;
 
   /// Package name → dir of the local packages a dependency reaches by name,
   /// without `path:`: workspace members, melos packages.
@@ -110,16 +115,19 @@ class Project {
       // melos 6 links a dependency on a melos package's name to the package.
       final linkedByName = _byName(melosPackages.values);
       final packages = {...melosPackages, root.dir: root};
+      final warnings = <String>[];
       _addReachable(
         packages,
         linkedByName: linkedByName,
         isResolving: (_) => true,
+        warnings: warnings,
       );
       return Project._(
         root: root,
         mode: ProjectMode.packages,
         packages: packages,
         members: const {},
+        warnings: warnings,
         linkedByName: linkedByName,
       );
     }
@@ -128,16 +136,19 @@ class Project {
     // pub resolves a dependency on a member's name to the member.
     final linkedByName = _byName(members.values);
     final packages = {...members};
+    final warnings = <String>[];
     _addReachable(
       packages,
       linkedByName: linkedByName,
       isResolving: members.containsKey,
+      warnings: warnings,
     );
     return Project._(
       root: root,
       mode: ProjectMode.workspace,
       packages: packages,
       members: members.keys.toSet(),
+      warnings: warnings,
       linkedByName: linkedByName,
     );
   }
@@ -342,11 +353,13 @@ class Project {
   }
 
   /// Adds to [packages] every package reachable from them through local
-  /// edges.
+  /// edges. An edge to a directory that does not exist is skipped, with a
+  /// message added to [warnings].
   static void _addReachable(
     Map<String, LocalPackage> packages, {
     required Map<String, String> linkedByName,
     required bool Function(String dir) isResolving,
+    required List<String> warnings,
   }) {
     final queue = [...packages.values];
     while (queue.isNotEmpty) {
@@ -357,6 +370,14 @@ class Project {
         linkedByName: linkedByName,
       )) {
         if (packages.containsKey(edge.dir)) continue;
+        if (FileSystemEntity.typeSync(edge.dir) ==
+            FileSystemEntityType.notFound) {
+          warnings.add(
+            '${package.pubspecPath}: dependency `${edge.name}` points to '
+            '${edge.dir}, which does not exist; skipped.',
+          );
+          continue;
+        }
         if (!_hasPubspec(edge.dir)) {
           throw FlavorOverridesException(
             '${package.pubspecPath}: dependency `${edge.name}` points to '

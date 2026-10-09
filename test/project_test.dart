@@ -198,6 +198,33 @@ dependencies:
             [project.path('app/pubspec.yaml'), project.path('feature')]),
       );
     });
+
+    test('a path to a missing directory is skipped with a warning', () {
+      // A generated package before code generation, say.
+      final app = project.pubspec('app', '''
+name: app
+dependencies:
+  generated:
+    path: ../generated
+''');
+
+      final result = Project.discover(app);
+
+      expect(result.packages.keys, [app]);
+      expect(result.localDependencies(app, resolving: true), isEmpty);
+      expect(result.warnings, [
+        allOf(
+          contains(project.path('app/pubspec.yaml')),
+          contains(project.path('generated')),
+        ),
+      ]);
+    });
+
+    test('found packages give no warnings', () {
+      final app = project.pubspec('app', 'name: app\n');
+
+      expect(Project.discover(app).warnings, isEmpty);
+    });
   });
 
   group('workspace', () {

@@ -3,7 +3,7 @@ description: >-
   CLI that swaps dependencies per Flutter flavor by generating
   pubspec_overrides.yaml, so a plugin's native code stays out of flavors that
   don't need it.
-version: 0.0.1
+version: 1.0.0
 repository: https://github.com/mavoryl/flutter_flavors_override
 issue_tracker: https://github.com/mavoryl/flutter_flavors_override/issues
 

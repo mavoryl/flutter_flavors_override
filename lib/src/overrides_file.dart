@@ -13,9 +13,10 @@ const markerPrefix = '# flutter_flavor_overrides:';
 ///
 /// Our entries are those listed in the marker comment line. They are replaced
 /// by [desired]; foreign entries, comments and other keys are kept. A foreign
-/// entry for a [desired] package is an error naming [filePath]. When nothing
-/// foreign is left in the YAML, [pubspecOverrides] are copied in as ours: the
-/// file replaces the pubspec's `dependency_overrides` as a whole (T4).
+/// entry for a [desired] package is an error naming [filePath]. With
+/// [desired] entries, [pubspecOverrides] are copied in as ours, but for
+/// packages a foreign entry overrides: pub ignores the pubspec's
+/// `dependency_overrides` once the file has the key (T4).
 /// A file without a final line break keeps having none, so that removing our
 /// entries gives back its text byte for byte.
 String? mergeOverrides({
@@ -70,11 +71,11 @@ String? mergeOverrides({
     return text.trim().isEmpty ? null : _endLike(existing, text);
   }
 
-  // 3. No foreign entries and no other keys: this file replaces the pubspec's
-  // dependency_overrides as a whole, so copy them in, as ours.
-  final hasContent = foreign.isNotEmpty || otherKeys.isNotEmpty;
+  // 3. With our entries, this file has `dependency_overrides`, so pub ignores
+  // the pubspec's: copy them in, as ours, except those it overrides itself.
   final entries = _sorted({
-    if (!hasContent) ...pubspecOverrides,
+    for (final MapEntry(:key, :value) in pubspecOverrides.entries)
+      if (!foreign.contains(key)) key: value,
     ...desired,
   });
 

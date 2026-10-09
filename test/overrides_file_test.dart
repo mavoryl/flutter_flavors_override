@@ -206,20 +206,51 @@ void main() {
       );
     });
 
-    test('are not copied next to foreign entries', () {
-      const foreign = 'dependency_overrides:\n'
-          '  core:\n'
-          '    path: ../core\n';
+    test('are copied into a file with other keys only', () {
+      // Without the key, the file leaves the pubspec's overrides in force;
+      // with ours, it replaces them.
+      const foreign = 'resolution: workspace\n';
+      const withProbe = '# flutter_flavor_overrides: ffo_probe,other\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          '  other:\n'
+          '    path: ../vendor/other\n'
+          'resolution: workspace\n';
 
       expect(
         merge(foreign, probe, pubspecOverrides: pubspecOverrides),
-        '# flutter_flavor_overrides: ffo_probe\n'
-        'dependency_overrides:\n'
-        '  core:\n'
-        '    path: ../core\n'
-        '  ffo_probe:\n'
-        '    path: ../stubs/ffo_probe\n',
+        withProbe,
       );
+      expect(
+        merge(withProbe, probe, pubspecOverrides: pubspecOverrides),
+        withProbe,
+      );
+      expect(
+        merge(withProbe, {}, pubspecOverrides: pubspecOverrides),
+        foreign,
+      );
+    });
+
+    test('are copied next to foreign entries, except those they override', () {
+      const melosFile = '# melos_managed_dependency_overrides: core\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n';
+      const withProbe = '# melos_managed_dependency_overrides: core\n'
+          '# flutter_flavor_overrides: ffo_probe,other\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe\n'
+          '  other:\n'
+          '    path: ../vendor/other\n';
+      const overrides = {'core': '1.0.0', ...pubspecOverrides};
+
+      expect(merge(melosFile, probe, pubspecOverrides: overrides), withProbe);
+      expect(merge(withProbe, probe, pubspecOverrides: overrides), withProbe);
+      expect(merge(withProbe, {}, pubspecOverrides: overrides), melosFile);
     });
 
     test('are not copied when nothing is desired', () {

@@ -58,8 +58,12 @@ flavor_overrides:
   file it writes.
 - Without a matching section the real package is used. A typo in a flavor name therefore means
   "no override", not an error.
-- The same package declared identically in several pubspecs is fine; different specs for one
-  package in one flavor are an error that names every pubspec involved.
+- Declare the override in **every** local package that depends on the plugin, not only in one of
+  them: without a workspace each package resolves on its own and only sees declarations it can
+  reach. Identical declarations in several pubspecs are merged; different specs for one package
+  in one flavor are an error that names every pubspec involved.
+- A declaration takes precedence over the same package in that pubspec's own
+  `dependency_overrides`.
 
 ## Write the stub
 
@@ -107,7 +111,10 @@ what it wrote.
   from the root or from any member.
 - **No workspace:** one file in every local package that resolves on its own — the app and each
   module reachable through `path:` dependencies — so modules get the override in their own tests
-  and analysis too. A package gets a file only if it can reach a declaration.
+  and analysis too. A package gets a file only if it can reach a declaration. Run the tool from
+  the package you build (the app, or `example/` in a plugin repository): only packages reachable
+  from it are visited, so `--clean` from a library does not reach an `example/` that depends on
+  it.
 - **melos 6 without a workspace:** packages listed under `packages:` in `melos.yaml` are local
   packages too, and dependencies on them by name count, so modules that melos links are covered.
   Run the tool from the melos root or from any melos package. melos's own entries and the tool's
@@ -132,6 +139,10 @@ with nothing but what the tool wrote is deleted when the tool removes its entrie
 | `--list-dependents` | Print the local packages that depend on a package overridden in this flavor; change nothing. |
 | `-C, --directory <dir>` | Run in `<dir>` instead of the current directory. |
 
+Paths in the output are relative to the directory the tool runs in (after `-C`). If no pubspec
+in the project declares the selected flavor, the tool says so on stderr — a typo in `--flavor`
+is visible — and still exits `0`.
+
 Exit codes: `0` success, `64` invalid usage, `1` a problem in the project or declarations (the
 message names the file). Every file is planned before any is written, so an error leaves the
 project untouched.
@@ -143,9 +154,8 @@ flavor build — usually at release time. Catch it on every PR:
 
 ```console
 flutter_flavor_overrides --flavor prod
-flutter pub get
 for pkg in $(flutter_flavor_overrides --flavor prod --list-dependents); do
-  (cd "$pkg" && dart analyze --fatal-infos)
+  (cd "$pkg" && flutter pub get && dart analyze --fatal-infos)
 done
 ```
 

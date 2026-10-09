@@ -167,18 +167,21 @@ typedef _Change = ({String path, String? text, List<String> packages});
 
 /// Every file change for [flavor] (null: clean), in output order.
 List<_Change> _plan(Project project, String? flavor) {
-  // Workspace members never hold our entries: drop any left over, e.g. from
-  // before the project became a workspace. What remains must not override
-  // what the root file does (T5).
-  final members = <String, String?>{
-    for (final dir in project.members.toList()..sort())
-      if (dir != project.root.dir) dir: null,
-  };
-  final memberChanges = <_Change>[];
-  for (final dir in members.keys) {
+  // In a workspace only the root holds our entries: drop any left over in
+  // the other local packages, members or not, e.g. from before the project
+  // became a workspace. What remains in members must not override what the
+  // root file does (T5).
+  final others = [
+    if (project.mode == ProjectMode.workspace)
+      for (final dir in project.packages.keys.toList()..sort())
+        if (dir != project.root.dir) dir,
+  ];
+  final members = <String, String?>{};
+  final otherChanges = <_Change>[];
+  for (final dir in others) {
     final (:change, :text) = _planFile(project, dir, const []);
-    members[dir] = text;
-    if (change != null) memberChanges.add(change);
+    if (project.members.contains(dir)) members[dir] = text;
+    if (change != null) otherChanges.add(change);
   }
 
   final changes = <_Change>[];
@@ -195,7 +198,7 @@ List<_Change> _plan(Project project, String? flavor) {
     final (:change, text: _) = _planFile(project, dir, declarations);
     if (change != null) changes.add(change);
   }
-  return [...changes, ...memberChanges];
+  return [...changes, ...otherChanges];
 }
 
 /// The pubspec_overrides.yaml of [dir] with [declarations] as our entries:

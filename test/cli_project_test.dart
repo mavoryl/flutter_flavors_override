@@ -829,6 +829,48 @@ dependency_overrides:
       expect(result.out, 'removed packages/feature/pubspec_overrides.yaml\n');
     });
 
+    group('a local package outside the workspace loses our entries', () {
+      setUp(() {
+        project.pubspec('packages/other', '''
+name: other
+resolution: workspace
+dependencies:
+  vendor:
+    path: ../../vendor
+''');
+        project.pubspec('vendor', 'name: vendor\n');
+        // Left by a run before the project became a workspace.
+        project.file(
+          'vendor/pubspec_overrides.yaml',
+          '# flutter_flavor_overrides: ffo_probe\n'
+              'dependency_overrides:\n'
+              '  ffo_probe:\n'
+              '    path: ../stubs/ffo_probe\n',
+        );
+      });
+
+      test('on a run', () async {
+        final result = await cli(['--flavor', 'prod']);
+
+        expect(result.err, isEmpty);
+        expect(result.code, 0);
+        expect(
+          result.out,
+          'wrote pubspec_overrides.yaml (ffo_probe)\n'
+          'removed vendor/pubspec_overrides.yaml\n',
+        );
+        expect(read('vendor/pubspec_overrides.yaml'), isNull);
+      });
+
+      test('on --clean', () async {
+        final result = await cli(['--clean']);
+
+        expect(result.code, 0);
+        expect(result.out, 'removed vendor/pubspec_overrides.yaml\n');
+        expect(read('vendor/pubspec_overrides.yaml'), isNull);
+      });
+    });
+
     test("the root's own dependency_overrides give way", () async {
       final result = await cli(['--flavor', 'prod']);
 

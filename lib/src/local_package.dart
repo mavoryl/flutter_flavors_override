@@ -15,7 +15,7 @@ class LocalPackage {
     this.dependencyOverrides = const {},
     this.workspace,
     this.inWorkspace = false,
-    this.flavorOverrides = const {},
+    this.hasFlavorOverridesSection = false,
   }) : dir = p.normalize(p.absolute(dir));
 
   /// Absolute, normalized directory of the package; [load] also resolves
@@ -36,14 +36,15 @@ class LocalPackage {
   /// `resolution: workspace`.
   final bool inWorkspace;
 
-  /// flavor → package → spec, exactly as written (paths relative to [dir]).
-  final Map<String, Map<String, Object?>> flavorOverrides;
+  /// The pubspec has a top-level `flavor_overrides` key, of any shape: where
+  /// overrides were declared before flavor_overrides.yaml.
+  final bool hasFlavorOverridesSection;
 
   String get pubspecPath => p.join(dir, 'pubspec.yaml');
 
   /// Reads `<dir>/pubspec.yaml`. Throws [FlavorOverridesException] naming the
   /// file when it is missing, is not valid YAML, has no string `name`, or when
-  /// a dependency section, `flavor_overrides` or a flavor entry is not a map.
+  /// a dependency section is not a map.
   static LocalPackage load(String dir) {
     final normalized = canonicalDir(dir);
     final pubspecPath = p.join(normalized, 'pubspec.yaml');
@@ -73,7 +74,6 @@ class LocalPackage {
       fail('`workspace` must be a list of paths.');
     }
 
-    final flavors = section(document['flavor_overrides'], 'flavor_overrides');
     return LocalPackage(
       dir: normalized,
       name: name,
@@ -86,10 +86,7 @@ class LocalPackage {
       ),
       workspace: (workspace as List<Object?>?)?.cast<String>(),
       inWorkspace: document['resolution'] == 'workspace',
-      flavorOverrides: {
-        for (final MapEntry(:key, :value) in flavors.entries)
-          key: section(value, 'flavor_overrides.$key'),
-      },
+      hasFlavorOverridesSection: document.containsKey('flavor_overrides'),
     );
   }
 }

@@ -89,8 +89,8 @@ String? _mergeLf({
     if (foreign.contains(name)) {
       throw FlavorOverridesException(
         '$filePath: `$name` is already overridden there, but not by '
-        'flutter_flavor_overrides. Remove that entry or the flavor_overrides '
-        'declaration of `$name`.',
+        'flutter_flavor_overrides. Remove that entry, or `$name` from '
+        'flavor_overrides.yaml.',
       );
     }
   }

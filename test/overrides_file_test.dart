@@ -294,7 +294,11 @@ void main() {
               isA<FlavorOverridesException>().having(
                 (e) => e.message,
                 'message',
-                allOf(contains(filePath), contains('ffo_probe')),
+                allOf(
+                  contains(filePath),
+                  contains('ffo_probe'),
+                  contains('flavor_overrides.yaml'),
+                ),
               ),
             ),
           );

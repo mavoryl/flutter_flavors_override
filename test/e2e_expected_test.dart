@@ -81,16 +81,18 @@ void main() {
 /// native projects, golden files.
 const _skipped = {'build', 'expected', 'android', 'ios'};
 
-/// Copies every pubspec.yaml and melos.yaml under [from] to the same place
-/// under [to]. Overrides files are left out: the CLI starts from none.
+const _manifests = {'pubspec.yaml', 'melos.yaml', 'flavor_overrides.yaml'};
+
+/// Copies every file the CLI reads (pubspec.yaml, melos.yaml,
+/// flavor_overrides.yaml) under [from] to the same place under [to].
+/// Overrides files are left out: the CLI starts from none.
 void _copyManifests(String from, String to) {
   for (final entity in Directory(from).listSync(followLinks: false)) {
     final name = p.basename(entity.path);
     if (entity is Directory) {
       if (name.startsWith('.') || _skipped.contains(name)) continue;
       _copyManifests(entity.path, p.join(to, name));
-    } else if (entity is File &&
-        (name == 'pubspec.yaml' || name == 'melos.yaml')) {
+    } else if (entity is File && _manifests.contains(name)) {
       Directory(to).createSync(recursive: true);
       entity.copySync(p.join(to, name));
     }

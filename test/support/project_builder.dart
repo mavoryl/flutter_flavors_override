@@ -23,6 +23,10 @@ class ProjectBuilder {
     return path(relativeDir);
   }
 
+  /// Writes `<relativeDir>/flavor_overrides.yaml` and returns its path.
+  String config(String relativeDir, String content) =>
+      file(p.join(relativeDir, 'flavor_overrides.yaml'), content);
+
   /// Writes [content] to [relativePath], creating parent directories.
   String file(String relativePath, String content) {
     final target = File(path(relativePath));

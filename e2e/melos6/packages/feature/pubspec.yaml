@@ -1,7 +1,7 @@
 name: feature
 description: >-
   Feature module of the melos6 fixture (melos 6, no workspace): the package
-  that depends on ffo_probe and declares its prod override.
+  that depends on ffo_probe.
 publish_to: none
 version: 0.0.1
 
@@ -16,10 +16,3 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^6.0.0
-
-# Read by flutter_flavor_overrides, ignored by pub. Paths are relative to this
-# pubspec.
-flavor_overrides:
-  prod:
-    ffo_probe:
-      path: ../../../stubs/ffo_probe

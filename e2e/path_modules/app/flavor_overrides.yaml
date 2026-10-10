@@ -1,0 +1,5 @@
+# Read by flutter_flavor_overrides: the overrides of this fixture, package,
+# then flavor, then dependency spec. Paths are relative to this file.
+ffo_probe:
+  prod:
+    path: ../../stubs/ffo_probe

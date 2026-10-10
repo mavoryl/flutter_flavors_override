@@ -83,14 +83,12 @@ awk '
     print "  ffo_probe:"
     print "    path: ../plugins/ffo_probe"
   }' "$pubspec" >"$pubspec.tmp" && mv "$pubspec.tmp" "$pubspec"
-cat >>"$pubspec" <<'EOF'
-
-flavor_overrides:
+cat >"$app/flavor_overrides.yaml" <<'EOF'
+ffo_probe:
   prod:
-    ffo_probe:
-      path: ../stubs/ffo_probe
+    path: ../stubs/ffo_probe
 EOF
-echo "   created e2e/smoke: depends on ffo_probe, prod override to its stub"
+echo "   created e2e/smoke: depends on ffo_probe; flavor_overrides.yaml: prod override to its stub"
 
 # --- the CLI ------------------------------------------------------------------
 

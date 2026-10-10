@@ -26,24 +26,25 @@ e2e/
     └── add_xcode_flavors.rb   adds the iOS and macOS flavor configurations and schemes
 ```
 
-The package that depends on `ffo_probe` declares the override for `prod`, with
-a path relative to its own pubspec:
+Each fixture declares the override for `prod` in one `flavor_overrides.yaml`
+next to its root pubspec (the fixture's root; for `path_modules`, which has
+none, the app), with a path relative to that file:
 
 ```yaml
-flavor_overrides:
+ffo_probe:
   prod:
-    ffo_probe:
-      path: ../stubs/ffo_probe
+    path: ../stubs/ffo_probe
 ```
 
 `<fixture>/expected/prod/` holds the golden `pubspec_overrides.yaml` files
 the CLI generates for `--flavor prod`, laid out as the fixture itself, with
 paths relative to where each file goes. With a workspace there is one file at
-the workspace root; without one, every local package that resolves gets its
-own. `dev` has no overrides, so there is no `expected/dev/`. The unit test
-`test/e2e_expected_test.dart` checks that the CLI writes exactly these files.
-Generated overrides files are ignored by git; the ones under `expected/` are
-tracked.
+the workspace root; without one, every local package that resolves and uses
+`ffo_probe` gets its own (the plugin itself does not: pub refuses a package
+that overrides itself). `dev` has no overrides, so there is no
+`expected/dev/`. The unit test `test/e2e_expected_test.dart` checks that the
+CLI writes exactly these files. Generated overrides files are ignored by git;
+the ones under `expected/` are tracked.
 
 `melos6` is a melos 6 repository without a pub workspace: the root
 `pubspec.yaml` has `melos: 6.3.3` as a dev dependency (run as `dart run
@@ -201,7 +202,8 @@ e2e/tool/smoke_min_flutter.sh [--keep]
 
 With the Flutter on `PATH`, it creates an Android app in a temporary
 directory next to copies of `plugins/` and `stubs/`, makes it depend on
-`ffo_probe` with a `prod` override to the stub, and runs the CLI on that
+`ffo_probe`, writes its `flavor_overrides.yaml` with a `prod` override to the
+stub, and runs the CLI on that
 Flutter's Dart (as a path dependency of a throwaway package: the repository's
 own dev dependencies need a newer SDK). After `--flavor prod` and `flutter pub
 get`, `package_config.json` points `ffo_probe` at the stub and neither

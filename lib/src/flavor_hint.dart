@@ -1,9 +1,11 @@
-/// The note for a `--flavor` that no pubspec in the project declares: most
+/// The note for a `--flavor` that flavor_overrides.yaml does not name: most
 /// likely a typo. Suggests close [declared] flavors and lists all of them.
 String missingFlavorNote(String flavor, Iterable<String> declared) {
   final head = 'no flavor_overrides for flavor `$flavor` in this project';
   final flavors = declared.toSet().toList()..sort();
-  if (flavors.isEmpty) return '$head: no pubspec declares flavor_overrides.';
+  if (flavors.isEmpty) {
+    return '$head: flavor_overrides.yaml declares no overrides.';
+  }
 
   final close = [
     for (final candidate in flavors)

@@ -1,92 +1,44 @@
 import 'package:path/path.dart' as p;
 
-import 'errors.dart';
+import 'config.dart';
 import 'local_package.dart' show canonicalDir;
 import 'paths.dart';
 import 'project.dart';
+import 'usage.dart';
 
 /// One package to override in a pubspec_overrides.yaml.
 class Declaration {
-  const Declaration({
-    required this.package,
-    required this.spec,
-    required this.sources,
-  });
+  const Declaration({required this.package, required this.spec});
 
   final String package;
 
   /// Spec rebased to the target dir (plain Dart).
   final Object? spec;
-
-  /// pubspec paths that declare it (several when deduplicated).
-  final List<String> sources;
 }
 
-/// Declarations for [flavor] that apply to the pubspec_overrides.yaml in
-/// [targetDir]: from every package in `project.reachableFrom(targetDir)`
-/// (workspace mode: from every local package). Sorted by package name.
-/// Identical rebased specs collapse; different specs for one package throw,
-/// naming every source.
+/// The overrides of [flavor] for the pubspec_overrides.yaml in [targetDir],
+/// one of `project.resolvingDirs`: every package of `config.forFlavor(flavor)`
+/// that the resolution of [targetDir] uses (see [usedPackages]), its spec
+/// rebased from `config.dir` to [targetDir]. Sorted by package name. A
+/// pubspec.lock that cannot be read adds a warning to [warnings].
 List<Declaration> declarationsFor(
   Project project,
+  OverridesConfig config,
   String targetDir,
-  String flavor,
-) {
+  String flavor, {
+  List<String>? warnings,
+}) {
   final target = canonicalDir(targetDir);
-  final sourceDirs = switch (project.mode) {
-    ProjectMode.workspace => project.packages.keys,
-    ProjectMode.packages => project.reachableFrom(target),
-  };
-
-  final found = <String, List<_Found>>{};
-  for (final dir in sourceDirs.toList()..sort()) {
-    final package = project.packages[dir]!;
-    final entries = package.flavorOverrides[flavor] ?? const {};
-    for (final MapEntry(key: name, value: written) in entries.entries) {
-      found.putIfAbsent(name, () => []).add((
-        source: package.pubspecPath,
-        written: written,
-        spec: rebaseSpec(written, fromDir: dir, toDir: target),
-      ));
-    }
-  }
-
+  final used = usedPackages(project, target, warnings: warnings);
   return [
-    for (final name in found.keys.toList()..sort())
-      _collapse(name, flavor, found[name]!),
+    for (final MapEntry(key: name, value: spec)
+        in config.forFlavor(flavor).entries)
+      if (used.contains(name))
+        Declaration(
+          package: name,
+          spec: rebaseSpec(spec, fromDir: config.dir, toDir: target),
+        ),
   ];
-}
-
-typedef _Found = ({String source, Object? written, Object? spec});
-
-Declaration _collapse(String name, String flavor, List<_Found> found) {
-  final spec = found.first.spec;
-  if (found.any((f) => !_deepEquals(f.spec, spec))) {
-    throw FlavorOverridesException(
-      'Different flavor_overrides for `$name` in flavor `$flavor`:\n'
-      '${found.map((f) => '  ${f.source}: ${f.written}').join('\n')}',
-    );
-  }
-  return Declaration(
-    package: name,
-    spec: spec,
-    sources: [for (final f in found) f.source],
-  );
-}
-
-bool _deepEquals(Object? a, Object? b) {
-  if (a is Map && b is Map) {
-    return a.length == b.length &&
-        a.keys.every((k) => b.containsKey(k) && _deepEquals(a[k], b[k]));
-  }
-  if (a is List && b is List) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (!_deepEquals(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  return a == b;
 }
 
 /// Rebases `path:` (and a relative filesystem `git:` url / `git: {url:}`) from

@@ -40,11 +40,11 @@ void main() {
       expect(
         missingFlavorNote('prod', const []),
         'no flavor_overrides for flavor `prod` in this project: '
-        'no pubspec declares flavor_overrides.',
+        'flavor_overrides.yaml declares no overrides.',
       );
     });
 
-    test('lists a flavor declared in several packages once', () {
+    test('lists a flavor given twice once', () {
       expect(
         missingFlavorNote('qa', ['prod', 'prod']),
         'no flavor_overrides for flavor `qa` in this project. '

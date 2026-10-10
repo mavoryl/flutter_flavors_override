@@ -1,7 +1,5 @@
-import 'dart:io';
-
+import 'package:flutter_flavor_overrides/src/config.dart';
 import 'package:flutter_flavor_overrides/src/declarations.dart';
-import 'package:flutter_flavor_overrides/src/errors.dart';
 import 'package:flutter_flavor_overrides/src/project.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -102,95 +100,200 @@ void main() {
     tearDown(() => project.delete());
 
     List<Map<String, Object?>> describe(List<Declaration> declarations) => [
-          for (final d in declarations)
-            {'package': d.package, 'spec': d.spec, 'sources': d.sources},
+          for (final d in declarations) {'package': d.package, 'spec': d.spec},
         ];
 
-    /// app → packages/feature by path; feature declares a prod stub.
-    void appWithFeature({String appExtra = ''}) {
+    /// The project of the config in [rootDir], discovered from there.
+    (Project, OverridesConfig) load(String rootDir) => (
+          Project.discover(project.path(rootDir)),
+          OverridesConfig.load(project.path('$rootDir/$configFileName')),
+        );
+
+    /// app → path: packages/feature → some_plugin, other_plugin; the config
+    /// is next to app, the root.
+    void appWithFeature({String appDependencies = '', String config = ''}) {
       project.pubspec('app', '''
 name: app
 dependencies:
   feature:
     path: ../packages/feature
-$appExtra''');
+$appDependencies''');
       project.pubspec('packages/feature', '''
 name: feature
-flavor_overrides:
-  prod:
-    some_plugin:
-      path: ../../stubs/some_plugin
-  dev:
-    other_plugin:
-      path: ../../stubs/other_plugin
+dependencies:
+  some_plugin: 1.0.0
+  other_plugin: 1.0.0
 ''');
+      project.config('app', '''
+some_plugin:
+  prod:
+    path: ../stubs/some_plugin
+other_plugin:
+  dev:
+    path: ../stubs/other_plugin
+$config''');
     }
 
-    test('a module declaration is rebased to each resolving package', () {
+    test('a spec is rebased to each package that uses it', () {
       appWithFeature();
-      final result = Project.discover(project.path('app'));
+      final (result, config) = load('app');
 
-      expect(describe(declarationsFor(result, project.path('app'), 'prod')), [
-        {
-          'package': 'some_plugin',
-          'spec': {'path': '../stubs/some_plugin'},
-          'sources': [project.path('packages/feature/pubspec.yaml')],
-        },
-      ]);
+      expect(
+        describe(declarationsFor(result, config, project.path('app'), 'prod')),
+        [
+          {
+            'package': 'some_plugin',
+            'spec': {'path': '../stubs/some_plugin'},
+          },
+        ],
+      );
       expect(
         describe(
-          declarationsFor(result, project.path('packages/feature'), 'prod'),
+          declarationsFor(
+            result,
+            config,
+            project.path('packages/feature'),
+            'prod',
+          ),
         ),
         [
           {
             'package': 'some_plugin',
             'spec': {'path': '../../stubs/some_plugin'},
-            'sources': [project.path('packages/feature/pubspec.yaml')],
           },
         ],
       );
     });
 
-    test('a flavor without declarations is empty', () {
+    test('a flavor without overrides is empty', () {
       appWithFeature();
-      final result = Project.discover(project.path('app'));
-
-      expect(declarationsFor(result, project.path('app'), 'staging'), isEmpty);
-    });
-
-    test('declarations of another flavor are ignored', () {
-      appWithFeature();
-      final result = Project.discover(project.path('app'));
+      final (result, config) = load('app');
 
       expect(
-        declarationsFor(result, project.path('app'), 'dev')
+        declarationsFor(result, config, project.path('app'), 'staging'),
+        isEmpty,
+      );
+    });
+
+    test('overrides of another flavor are left out', () {
+      appWithFeature();
+      final (result, config) = load('app');
+
+      expect(
+        declarationsFor(result, config, project.path('app'), 'dev')
             .map((d) => d.package),
         ['other_plugin'],
       );
     });
 
-    test('packages not reachable from the target do not contribute', () {
-      appWithFeature(appExtra: '''
-flavor_overrides:
-  prod:
-    app_only: 1.0.0
+    test('a package the target does not use is left out', () {
+      appWithFeature(appDependencies: '  app_only: 1.0.0\n', config: '''
+app_only:
+  prod: 2.0.0
+unused:
+  prod: 2.0.0
 ''');
-      final result = Project.discover(project.path('app'));
+      final (result, config) = load('app');
 
-      // feature does not depend on app, so app's declarations stay out.
+      // feature does not depend on app, so app's own dependencies stay out.
       expect(
-        declarationsFor(result, project.path('packages/feature'), 'prod')
-            .map((d) => d.package),
+        declarationsFor(
+          result,
+          config,
+          project.path('packages/feature'),
+          'prod',
+        ).map((d) => d.package),
         ['some_plugin'],
       );
       expect(
-        declarationsFor(result, project.path('app'), 'prod')
+        declarationsFor(result, config, project.path('app'), 'prod')
             .map((d) => d.package),
         ['app_only', 'some_plugin'],
       );
     });
 
-    test('workspace: declarations from every local package go to the root', () {
+    test('a package used through pubspec.lock only is included', () {
+      appWithFeature(config: '''
+transitive_plugin:
+  prod: 2.0.0
+''');
+      project.file('app/pubspec.lock', '''
+packages:
+  transitive_plugin:
+    dependency: transitive
+    source: hosted
+    version: "1.0.0"
+''');
+      final (result, config) = load('app');
+
+      expect(
+        declarationsFor(result, config, project.path('app'), 'prod')
+            .map((d) => d.package),
+        ['some_plugin', 'transitive_plugin'],
+      );
+      expect(
+        declarationsFor(
+          result,
+          config,
+          project.path('packages/feature'),
+          'prod',
+        ).map((d) => d.package),
+        ['some_plugin'],
+      );
+    });
+
+    test('a pubspec.lock that cannot be read is a warning', () {
+      appWithFeature();
+      final lock = project.file('app/pubspec.lock', '- a\n');
+      final (result, config) = load('app');
+      final warnings = <String>[];
+
+      expect(
+        declarationsFor(
+          result,
+          config,
+          project.path('app'),
+          'prod',
+          warnings: warnings,
+        ).map((d) => d.package),
+        ['some_plugin'],
+      );
+      expect(warnings, [startsWith('$lock: ')]);
+    });
+
+    test('a package never overrides itself', () {
+      appWithFeature(config: '''
+feature:
+  prod:
+    path: ../stubs/feature
+''');
+      final (result, config) = load('app');
+
+      expect(
+        describe(declarationsFor(result, config, project.path('app'), 'prod')),
+        [
+          {
+            'package': 'feature',
+            'spec': {'path': '../stubs/feature'},
+          },
+          {
+            'package': 'some_plugin',
+            'spec': {'path': '../stubs/some_plugin'},
+          },
+        ],
+      );
+      expect(
+        declarationsFor(
+          result,
+          config,
+          project.path('packages/feature'),
+          'prod',
+        ).map((d) => d.package),
+        ['some_plugin'],
+      );
+    });
+
+    test('workspace: whatever any package uses goes to the root', () {
       project.pubspec('.', '''
 name: root
 workspace:
@@ -200,9 +303,8 @@ workspace:
       project.pubspec('app', '''
 name: app
 resolution: workspace
-flavor_overrides:
-  prod:
-    z_plugin: 2.0.0
+dependencies:
+  z_plugin: 1.0.0
 ''');
       project.pubspec('packages/feature', '''
 name: feature
@@ -210,119 +312,63 @@ resolution: workspace
 dependencies:
   vendor:
     path: ../../vendor
-flavor_overrides:
-  prod:
-    some_plugin:
-      path: ../../stubs/some_plugin
+  some_plugin: 1.0.0
 ''');
-      project.pubspec('vendor', '''
-name: vendor
-flavor_overrides:
+      project.pubspec(
+        'vendor',
+        'name: vendor\ndependencies:\n  a_plugin: any\n',
+      );
+      project.config('.', '''
+z_plugin:
+  prod: 2.0.0
+some_plugin:
   prod:
-    a_plugin:
-      git: ../repos/a_plugin
+    path: stubs/some_plugin
+a_plugin:
+  prod:
+    git: repos/a_plugin
+not_used:
+  prod: 1.0.0
 ''');
-      final result = Project.discover(project.path('app'));
+      final (result, config) = load('.');
 
-      expect(describe(declarationsFor(result, project.root, 'prod')), [
-        {
-          'package': 'a_plugin',
-          'spec': {'git': 'repos/a_plugin'},
-          'sources': [project.path('vendor/pubspec.yaml')],
-        },
-        {
-          'package': 'some_plugin',
-          'spec': {'path': 'stubs/some_plugin'},
-          'sources': [project.path('packages/feature/pubspec.yaml')],
-        },
-        {
-          'package': 'z_plugin',
-          'spec': '2.0.0',
-          'sources': [project.path('app/pubspec.yaml')],
-        },
-      ]);
+      expect(
+        describe(declarationsFor(result, config, project.root, 'prod')),
+        [
+          {
+            'package': 'a_plugin',
+            'spec': {'git': 'repos/a_plugin'},
+          },
+          {
+            'package': 'some_plugin',
+            'spec': {'path': 'stubs/some_plugin'},
+          },
+          {'package': 'z_plugin', 'spec': '2.0.0'},
+        ],
+      );
     });
 
-    test('identical declarations collapse into one with every source', () {
-      appWithFeature(appExtra: '''
-flavor_overrides:
-  prod:
-    some_plugin:
-      path: ../stubs/some_plugin
-''');
-      final result = Project.discover(project.path('app'));
-
-      expect(describe(declarationsFor(result, project.path('app'), 'prod')), [
-        {
-          'package': 'some_plugin',
-          'spec': {'path': '../stubs/some_plugin'},
-          'sources': [
-            project.path('app/pubspec.yaml'),
-            project.path('packages/feature/pubspec.yaml'),
-          ],
-        },
-      ]);
-    });
-
-    test('a package reached through a symbolic link declares once', () {
+    test('a module on another depth gets the path from there', () {
       project.pubspec('app', '''
 name: app
 dependencies:
-  a:
-    path: ../a
-  b:
-    path: ../b
+  deep:
+    path: ../a/b/c/deep
 ''');
-      project.pubspec(
-          'a', 'name: a\ndependencies:\n  core:\n    path: ../core\n');
-      project.pubspec('b', '''
-name: b
-dependencies:
-  core:
-    path: ../links/core_alias
-''');
-      project.pubspec('core', '''
-name: core
-flavor_overrides:
-  prod:
-    some_plugin:
-      path: ../stubs/some_plugin
-''');
-      project.link('links/core_alias', '../core');
-      final result = Project.discover(project.path('app'));
-
-      expect(describe(declarationsFor(result, project.path('app'), 'prod')), [
-        {
-          'package': 'some_plugin',
-          'spec': {'path': '../stubs/some_plugin'},
-          'sources': [project.path('core/pubspec.yaml')],
-        },
-      ]);
-    }, skip: Platform.isWindows ? 'symbolic links need privileges' : false);
-
-    test('different declarations for one package are an error', () {
-      appWithFeature(appExtra: '''
-flavor_overrides:
-  prod:
-    some_plugin:
-      path: ../stubs/another_stub
-''');
-      final result = Project.discover(project.path('app'));
+      project.pubspec('a/b/c/deep', 'name: deep\ndependencies:\n  x: any\n');
+      project.config('app', 'x:\n  prod:\n    path: ../stubs/x\n');
+      final (result, config) = load('app');
 
       expect(
-        () => declarationsFor(result, project.path('app'), 'prod'),
-        throwsA(
-          isA<FlavorOverridesException>().having(
-            (e) => e.message,
-            'message',
-            allOf([
-              contains('some_plugin'),
-              contains('prod'),
-              contains(project.path('app/pubspec.yaml')),
-              contains(project.path('packages/feature/pubspec.yaml')),
-            ]),
-          ),
+        describe(
+          declarationsFor(result, config, project.path('a/b/c/deep'), 'prod'),
         ),
+        [
+          {
+            'package': 'x',
+            'spec': {'path': '../../../../stubs/x'},
+          },
+        ],
       );
     });
   });

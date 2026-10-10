@@ -87,9 +87,10 @@ jobs:
           dependencies:
             flutter_flavor_overrides:
               path: ../package
-          flavor_overrides:
-            prod:
-              args: 2.7.0
+          EOF
+          cat > consumer/flavor_overrides.yaml <<'EOF'
+          args:
+            prod: 2.7.0
           EOF
 
       - name: pub get
@@ -97,12 +98,15 @@ jobs:
         run: dart pub get
 
       # A real round trip on the minimum SDK: write the overrides file, check it,
-      # then remove it again.
+      # then remove it again. The package itself, a path: dependency that uses
+      # args, gets a file too.
       - name: run CLI
         working-directory: consumer
         run: |
           dart run flutter_flavor_overrides --flavor prod
           cat pubspec_overrides.yaml
           grep -qx '# flutter_flavor_overrides: args' pubspec_overrides.yaml
+          grep -qx '# flutter_flavor_overrides: args' ../package/pubspec_overrides.yaml
           dart run flutter_flavor_overrides --clean
           test ! -e pubspec_overrides.yaml
+          test ! -e ../package/pubspec_overrides.yaml

@@ -54,12 +54,7 @@ flavor_overrides:
         'git': {'url': 'https://example.com/other.git', 'ref': 'main'},
       },
     });
-    expect(package.flavorOverrides, {
-      'prod': {
-        'some_plugin': {'path': '../stubs/some_plugin'},
-      },
-      'dev': {'other': '2.0.0'},
-    });
+    expect(package.hasFlavorOverridesSection, isTrue);
   });
 
   test('missing sections are empty, workspace is null', () {
@@ -70,7 +65,7 @@ flavor_overrides:
     expect(package.dependencyOverrides, isEmpty);
     expect(package.workspace, isNull);
     expect(package.inWorkspace, isFalse);
-    expect(package.flavorOverrides, isEmpty);
+    expect(package.hasFlavorOverridesSection, isFalse);
   });
 
   test('sections without a value are empty, like pub reads them', () {
@@ -87,31 +82,17 @@ flavor_overrides:
     expect(package.devDependencies, isEmpty);
     expect(package.dependencyOverrides, isEmpty);
     expect(package.inWorkspace, isFalse);
-    expect(package.flavorOverrides, isEmpty);
+    expect(package.hasFlavorOverridesSection, isTrue);
   });
 
-  test('a flavor without entries is empty', () {
-    final package = LocalPackage.load(project.pubspec('app', '''
-name: app
-flavor_overrides:
-  prod:
-'''));
+  test('a flavor_overrides section of any shape is only noted', () {
+    for (final section in ['[a]', '3', '{prod: 3}']) {
+      final package = LocalPackage.load(
+        project.pubspec('app', 'name: app\nflavor_overrides: $section\n'),
+      );
 
-    expect(package.flavorOverrides, {'prod': <String, Object?>{}});
-  });
-
-  test('a null spec is kept: hosted, any version', () {
-    final package = LocalPackage.load(project.pubspec('app', '''
-name: app
-flavor_overrides:
-  prod:
-    some_plugin:
-'''));
-
-    expect(package.flavorOverrides, {
-      'prod': {'some_plugin': null},
-    });
-    expect(package.flavorOverrides['prod'], containsPair('some_plugin', null));
+      expect(package.hasFlavorOverridesSection, isTrue, reason: section);
+    }
   });
 
   test('normalizes the directory', () {
@@ -162,17 +143,6 @@ flavor_overrides:
 
     test('a name that is not a string', () {
       expectError('name: 3\n', '`name`');
-    });
-
-    test('flavor_overrides is not a map', () {
-      expectError('name: app\nflavor_overrides: [a]\n', '`flavor_overrides`');
-    });
-
-    test('a flavor entry is not a map', () {
-      expectError(
-        'name: app\nflavor_overrides:\n  prod: 3\n',
-        '`flavor_overrides.prod`',
-      );
     });
 
     test('a dependency section is not a map', () {

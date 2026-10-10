@@ -1,7 +1,7 @@
 name: single_app
 description: >-
   Single-package fixture of the flutter_flavor_overrides e2e suite: the
-  app itself depends on ffo_probe and declares its prod override.
+  app itself depends on ffo_probe.
 publish_to: none
 version: 1.0.0+1
 
@@ -16,13 +16,6 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^6.0.0
-
-# Read by flutter_flavor_overrides, ignored by pub. Paths are relative to this
-# pubspec.
-flavor_overrides:
-  prod:
-    ffo_probe:
-      path: ../stubs/ffo_probe
 
 flutter:
   uses-material-design: true

@@ -126,11 +126,14 @@ Future<int> run(
     if (config == null && !clean && !_hasPubspec(start)) {
       throw _noConfig(start);
     }
-    if (config != null && !_hasPubspec(config.dir)) {
-      throw FlavorOverridesException(
-        '${config.path}: no pubspec.yaml next to it; $configFileName goes '
-        'next to the root pubspec.yaml of the project.',
-      );
+    if (config != null) {
+      if (!_hasPubspec(config.dir)) {
+        throw FlavorOverridesException(
+          '${config.path}: no pubspec.yaml next to it; $configFileName goes '
+          'next to the root pubspec.yaml of the project.',
+        );
+      }
+      _checkAncestors(config);
     }
     // The project is what its root sees, the root being the directory of
     // the file; without one (--clean only), as found from where it runs.
@@ -138,7 +141,7 @@ Future<int> run(
     for (final warning in project.warnings) {
       errors.writeln('$_name: warning: $warning');
     }
-    _checkProject(project, config);
+    _checkProject(project, config?.path);
     if (config == null && !clean) throw _noConfig(start);
 
     // Most likely a typo in --flavor; still a valid run, which removes ours.
@@ -199,30 +202,57 @@ FlavorOverridesException _noConfig(String start) => FlavorOverridesException(
 
 bool _hasPubspec(String dir) => File(p.join(dir, 'pubspec.yaml')).existsSync();
 
-/// One flavor_overrides.yaml per project, next to the root pubspec.yaml
-/// ([config] or none), and no `flavor_overrides` left in a pubspec of the
-/// project: the same errors whichever directory the tool runs from.
-void _checkProject(Project project, OverridesConfig? config) {
+/// The config file at [path] is not the one of [project], next to its root.
+FlavorOverridesException _misplaced(String path, Project project) =>
+    FlavorOverridesException(
+      '$path: a project has one $configFileName, next to its root '
+      'pubspec.yaml (${project.root.pubspecPath}): move its overrides to '
+      '${p.join(project.root.dir, configFileName)}.',
+    );
+
+/// The config files above [config]: one whose project has the package next
+/// to [config] as a local package makes it a second config of that project,
+/// an error as it is from the root (see [_checkProject]). Others are
+/// unrelated.
+void _checkAncestors(OverridesConfig config) {
+  for (var dir = config.dir; p.dirname(dir) != dir;) {
+    final path = OverridesConfig.find(p.dirname(dir));
+    if (path == null) return;
+    dir = p.dirname(path);
+    if (!_hasPubspec(dir)) continue;
+    final project = Project.discover(dir);
+    if (!project.packages.containsKey(config.dir)) continue;
+    _checkProject(project, path);
+    // Not reached: config.dir is inside the directory of that project.
+    throw _misplaced(config.path, project);
+  }
+}
+
+/// One flavor_overrides.yaml per project, next to the root pubspec.yaml (the
+/// one at [configPath], or none), and no `flavor_overrides` left in a
+/// pubspec: the same errors whichever directory the tool runs from. Only
+/// local packages inside the directory of the root count; those outside it,
+/// such as a sibling repository reached through `path:`, are projects of
+/// their own.
+void _checkProject(Project project, String? configPath) {
   final root = project.root;
-  final expected = p.join(root.dir, configFileName);
+  bool inside(String dir) => dir == root.dir || p.isWithin(root.dir, dir);
+  final configDir = configPath == null ? null : p.dirname(configPath);
   final misplaced = [
-    if (config != null && config.dir != root.dir) config.path,
+    if (configPath != null && configDir != root.dir) configPath,
     for (final dir in project.packages.keys.toList()..sort())
       if (dir != root.dir &&
-          dir != config?.dir &&
+          dir != configDir &&
+          inside(dir) &&
           File(p.join(dir, configFileName)).existsSync())
         p.join(dir, configFileName),
   ];
-  if (misplaced.isNotEmpty) {
-    throw FlavorOverridesException(
-      '${misplaced.first}: a project has one $configFileName, next to its '
-      'root pubspec.yaml (${root.pubspecPath}): move its overrides to '
-      '$expected.',
-    );
-  }
+  if (misplaced.isNotEmpty) throw _misplaced(misplaced.first, project);
+
+  final expected = p.join(root.dir, configFileName);
   for (final dir in project.packages.keys.toList()..sort()) {
     final package = project.packages[dir]!;
-    if (package.hasFlavorOverridesSection) {
+    if (inside(dir) && package.hasFlavorOverridesSection) {
       throw FlavorOverridesException(
         '${package.pubspecPath}: `flavor_overrides` in a pubspec is not '
         'read: move it to $expected (package, then flavor, then dependency '

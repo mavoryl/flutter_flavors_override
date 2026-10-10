@@ -13,8 +13,8 @@
   workspace).
 - Checks before writing anything: a `path:` override must point to a package of that name; pub
   workspace members cannot be overridden (pub refuses), with a hint to depend on the package
-  through `path:` instead; a `flavor_overrides.yaml` elsewhere in the project or a
-  `flavor_overrides` section in a pubspec is an error.
+  through `path:` instead; another `flavor_overrides.yaml` or a `flavor_overrides` section in a
+  pubspec of the project, inside its root directory, is an error from any start directory.
 - Merges into existing files: owns only the entries listed in its marker comment, keeps
   foreign entries and comments, takes over entries melos manages, fails on a conflicting
   hand-written entry, and gives the file back byte for byte (line endings included) when its

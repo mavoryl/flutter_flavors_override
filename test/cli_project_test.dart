@@ -248,28 +248,123 @@ dependencies:
       });
     });
 
-    test('in a module as well as next to the root: an error naming both',
-        () async {
-      project.pubspec('app', '''
+    group('another one in a module inside the root directory', () {
+      late String root;
+      late String nested;
+
+      setUp(() {
+        project.pubspec('app', '''
 name: app
 dependencies:
   feature:
-    path: ../packages/feature
+    path: modules/feature
 ''');
-      project.pubspec('packages/feature', '''
+        project.pubspec('app/modules/feature', '''
 name: feature
 dependencies:
   ffo_probe: 1.0.0
 ''');
-      final root = probeConfig('app', '../stubs/ffo_probe');
-      final nested = probeConfig('packages/feature', '../../stubs/ffo_probe');
+        root = probeConfig('app', '../stubs/ffo_probe');
+        nested = probeConfig('app/modules/feature', '../../../stubs/ffo_probe');
+      });
+
+      test('the same error from the root and from the module, nothing written',
+          () async {
+        final fromRoot = await cli(['--flavor', 'prod'], dir: 'app');
+        final fromModule = await cli(
+          ['--flavor', 'prod'],
+          dir: 'app/modules/feature',
+        );
+
+        expect(fromRoot.code, 1);
+        expect(fromModule.code, 1);
+        expect(
+          fromRoot.err,
+          'flutter_flavor_overrides: error: $nested: a project has one '
+          'flavor_overrides.yaml, next to its root pubspec.yaml '
+          '(${project.path('app/pubspec.yaml')}): move its overrides to '
+          '$root.\n',
+        );
+        expect(fromModule.err, fromRoot.err);
+        expect(read('app/pubspec_overrides.yaml'), isNull);
+        expect(read('app/modules/feature/pubspec_overrides.yaml'), isNull);
+      });
+
+      test('--clean from the module fails the same way', () async {
+        project.file('app/modules/feature/pubspec_overrides.yaml', probeFile);
+
+        final result = await cli(['--clean'], dir: 'app/modules/feature');
+
+        expect(result.code, 1);
+        expect(result.err, contains(nested));
+        expect(
+          read('app/modules/feature/pubspec_overrides.yaml'),
+          probeFile,
+        );
+      });
+    });
+
+    test('a package outside the root directory keeps its own', () async {
+      // A sibling repository, reached through path:, that uses the tool
+      // itself: its file and a section left in its pubspec are its own.
+      project.pubspec('app', '''
+name: app
+dependencies:
+  ffo_probe: 1.0.0
+  shared:
+    path: ../other_repo/shared
+''');
+      project.pubspec('other_repo/shared', '''
+name: shared
+flavor_overrides:
+  prod:
+    other_plugin: 1.0.0
+''');
+      project.config('other_repo/shared', 'other_plugin:\n  qa: 1.0.0\n');
+      probeConfig('app', '../stubs/ffo_probe');
 
       final result = await cli(['--flavor', 'prod'], dir: 'app');
 
-      expect(result.code, 1);
-      expect(result.err, contains(nested));
-      expect(result.err, contains(root));
-      expect(read('app/pubspec_overrides.yaml'), isNull);
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+      expect(result.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
+      expect(read('app/pubspec_overrides.yaml'), probeFile);
+    });
+
+    group('one in a directory above', () {
+      setUp(() {
+        project.pubspec('tools/app', '''
+name: tools_app
+dependencies:
+  ffo_probe: 1.0.0
+''');
+        probeConfig('tools/app', '../../stubs/ffo_probe');
+      });
+
+      test('is unrelated when its project does not include this one', () async {
+        project.pubspec(
+            '.', 'name: outer\ndependencies:\n  ffo_probe: 1.0.0\n');
+        probeConfig('.', 'stubs/ffo_probe');
+
+        final fromApp = await cli(['--flavor', 'prod'], dir: 'tools/app');
+        final fromOuter = await cli(['--flavor', 'prod']);
+
+        expect(fromApp.err, isEmpty);
+        expect(fromApp.code, 0);
+        expect(fromApp.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
+        expect(fromOuter.err, isEmpty);
+        expect(fromOuter.code, 0);
+        expect(fromOuter.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
+      });
+
+      test('is unrelated without a pubspec.yaml next to it', () async {
+        probeConfig('.', 'stubs/ffo_probe');
+
+        final result = await cli(['--flavor', 'prod'], dir: 'tools/app');
+
+        expect(result.err, isEmpty);
+        expect(result.code, 0);
+      });
     });
 
     group('a flavor_overrides section in a pubspec', () {
@@ -278,16 +373,16 @@ dependencies:
 name: app
 dependencies:
   feature:
-    path: ../packages/feature
+    path: modules/feature
 ''');
-        project.pubspec('packages/feature', '''
+        project.pubspec('app/modules/feature', '''
 name: feature
 dependencies:
   ffo_probe: 1.0.0
 flavor_overrides:
   prod:
     ffo_probe:
-      path: ../../stubs/ffo_probe
+      path: ../../../stubs/ffo_probe
 ''');
       });
 
@@ -300,12 +395,12 @@ flavor_overrides:
         expect(
           result.err,
           'flutter_flavor_overrides: error: '
-          '${project.path('packages/feature/pubspec.yaml')}: '
+          '${project.path('app/modules/feature/pubspec.yaml')}: '
           '`flavor_overrides` in a pubspec is not read: move it to $config '
           '(package, then flavor, then dependency spec).\n',
         );
         expect(read('app/pubspec_overrides.yaml'), isNull);
-        expect(read('packages/feature/pubspec_overrides.yaml'), isNull);
+        expect(read('app/modules/feature/pubspec_overrides.yaml'), isNull);
       });
 
       test('is an error without flavor_overrides.yaml too', () async {
@@ -314,7 +409,7 @@ flavor_overrides:
         expect(result.code, 1);
         expect(
           result.err,
-          contains(project.path('packages/feature/pubspec.yaml')),
+          contains(project.path('app/modules/feature/pubspec.yaml')),
         );
         expect(
           result.err,

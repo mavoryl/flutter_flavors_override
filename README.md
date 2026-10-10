@@ -63,8 +63,10 @@ root, the melos root, or the app itself (a single package, or an app with module
   In a pub workspace, a member must not override the same package itself: pub refuses a package
   overridden in two places, so the tool stops with an error instead.
 - One file per project: the tool finds it from the directory it runs in, going up, and its
-  directory is the project root. A `flavor_overrides.yaml` in another package of the project, or a
-  `flavor_overrides` section left in a pubspec, is an error.
+  directory is the project root. A `flavor_overrides.yaml` in another package of the project
+  inside that directory, or a `flavor_overrides` section left in a pubspec there, is an error,
+  whichever directory the tool runs from. A package outside it, such as a sibling repository
+  reached through `path:`, is a project of its own and keeps its own file.
 
 Flavor keys are just labels matched against `--flavor`; they don't have to match your Flutter
 flavors. To vary overrides by build mode too, use composite keys such as `prodRelease` and

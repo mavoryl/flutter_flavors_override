@@ -1,0 +1,16 @@
+name: melos6_local
+
+packages:
+  - app
+  - packages/*
+  # The shared test plugin is a melos package here, linked by version. The
+  # glob matches its stub as well, which has the same name.
+  - ../*/ffo_probe
+
+# melos refuses two packages with one name: the stub stays out.
+ignore:
+  - ../stubs/*
+
+ide:
+  intellij:
+    enabled: false

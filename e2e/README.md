@@ -18,6 +18,7 @@ e2e/
 ├── workspace/           pub workspace: app/ -> packages/feature/ -> ffo_probe
 ├── path_modules/        no workspace: app/ -> path: packages/feature/ -> ffo_probe
 ├── melos6/              melos 6, no workspace: app/ -> feature (linked by melos) -> ffo_probe
+├── melos6_local/        melos 6, no workspace: app/ -> feature -> ffo_probe, both linked by melos
 └── tool/
     ├── verify.sh              builds a fixture and checks the plugin's footprint
     ├── smoke_min_flutter.sh   pub-level smoke test on the oldest supported Flutter
@@ -51,6 +52,15 @@ links it to `packages/feature`, through the app's `pubspec_overrides.yaml`.
 That file then holds the entries of melos and of the CLI side by side, each
 under its own marker comment. `melos6` has no iOS project.
 
+`melos6_local` is the same, except that the plugin to swap is a melos package
+itself: its `melos.yaml` lists `../*/ffo_probe` besides `app` and
+`packages/*`, and `feature` depends on `ffo_probe: 0.0.1` by version, so
+`melos bootstrap` links the plugin too. That glob matches the stub as well,
+which has the plugin's name; melos refuses two packages with one name, so
+`ignore:` leaves out `../stubs/*`. In `prod` the CLI takes melos's entry for
+`ffo_probe` over: the name leaves melos's marker for ours, and `melos
+bootstrap` then leaves the entry alone. It has no iOS project either.
+
 ## Flavors
 
 Each app has the flavors `dev` and `prod`:
@@ -65,18 +75,18 @@ Each app has the flavors `dev` and `prod`:
 ## Running
 
 ```bash
-e2e/tool/verify.sh <single|workspace|path_modules|melos6> <android|ios-cocoapods|ios-spm> <dev|prod>
+e2e/tool/verify.sh <single|workspace|path_modules|melos6|melos6_local> <android|ios-cocoapods|ios-spm> <dev|prod>
 ```
 
 The script never builds in the repository. It copies `e2e/` (the files a fresh
 checkout would have) to a temporary directory and runs the CLI of this
 repository there, `bin/flutter_flavor_overrides.dart --flavor <flavor>`, from
 where a developer would: the app for `single` and `path_modules`, the root for
-`workspace` and `melos6`. It passes the repository's package config to `dart`
+`workspace`, `melos6` and `melos6_local`. It passes the repository's package config to `dart`
 explicitly: `dart run <file>` would first run `pub get` in the fixture, before
 the overrides exist. Then it runs `flutter pub get` (at the workspace root for
 `workspace`, in the app and the feature package for `path_modules`; `dart run
-melos bootstrap` for `melos6`) and builds the app:
+melos bootstrap` for `melos6` and `melos6_local`) and builds the app:
 
 - `flutter build apk --release --flavor <flavor>`, or
 - `flutter build ios --release --flavor <flavor> --no-codesign`, after setting
@@ -108,6 +118,17 @@ CLI, `melos bootstrap`, the build and all the checks. Its app's
 (`# flutter_flavor_overrides: ffo_probe`) in `prod`, none in `dev`; the app
 must resolve `feature` to `packages/feature`.
 
+`melos6_local` runs on Android only too, in one copy: `melos bootstrap` first,
+which links the plugin, then the requested flavor, the other one, and the
+requested one again. The first of them gets the CLI, `flutter pub get` in the
+app instead of `melos bootstrap`, and the build, so only the app's
+`package_config.json` is checked there. The others get the CLI, `melos
+bootstrap` and the build. Some `pub get` has to follow the CLI: `flutter
+build` skips its own while `pubspec.yaml` is older than `pubspec.lock` and
+`package_config.json`, and does not look at `pubspec_overrides.yaml`
+(Flutter 3.44.8, `flutter_tools/lib/src/dart/pub.dart`). On top of the `melos6` checks, melos's marker in
+the app's file must list `ffo_probe` in `dev` and must not in `prod`.
+
 Checks that do not depend on the flavor confirm the setup:
 
 - the flavor was applied: the APK is `app-<flavor>-release.apk` with the
@@ -123,7 +144,8 @@ Options:
 
 - `--golden` lays out the golden files instead of running the CLI: it
   removes every `pubspec_overrides.yaml` in the copy and copies
-  `expected/<flavor>/` over the fixture.
+  `expected/<flavor>/` over the fixture. Not for `melos6_local`, whose first
+  build needs the links of melos that this would remove.
 - `--no-overrides` is a negative control, `prod` must then fail: the CLI runs
   with `--clean` instead of `--flavor` (with `--golden`: nothing is laid out).
 - `--keep` keeps the temporary copy and prints its path.
@@ -182,4 +204,5 @@ Linux alike.
   io.github.mavoryl`, then `ruby e2e/tool/add_ios_flavors.rb
   <app>/ios/Runner.xcodeproj`.
 - `melos6/app` is a copy of `path_modules/app` without `ios/`, renamed to
-  `melos6_app`.
+  `melos6_app`; `melos6_local/app` is a copy of it, renamed to
+  `melos6_local_app`.

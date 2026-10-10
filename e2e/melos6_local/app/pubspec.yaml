@@ -1,0 +1,23 @@
+name: melos6_local_app
+description: >-
+  App of the melos6_local fixture (melos 6, no pub workspace) of the
+  flutter_flavor_overrides e2e suite: it reaches ffo_probe, a melos package
+  here, through the feature package.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # By version, not by path: `melos bootstrap` links it to packages/feature
+  # through pubspec_overrides.yaml.
+  feature: 0.0.1
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

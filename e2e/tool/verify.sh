@@ -4,12 +4,13 @@
 # it, `prod` must not (there ffo_probe resolves to its no-op stub).
 #
 # Usage:
-#   e2e/tool/verify.sh [options] <single|workspace|path_modules|melos6> \
+#   e2e/tool/verify.sh [options] \
+#       <single|workspace|path_modules|melos6|melos6_local> \
 #       <android|ios-cocoapods|ios-spm> <dev|prod>
 #
 # Options:
 #   --golden         lay out the golden files from <fixture>/expected/<flavor>/
-#                    instead of running the CLI
+#                    instead of running the CLI (not for melos6_local)
 #   --no-overrides   a negative control, `prod` must then FAIL: run the CLI
 #                    with --clean instead of --flavor (with --golden: lay out
 #                    nothing)
@@ -28,13 +29,19 @@
 # golden files (the same tree as the fixture). For iOS it sets `flutter:
 # config: enable-swift-package-manager:` in the copy of the app's pubspec, so
 # the machine's global `flutter config` does not matter. Then `flutter pub
-# get` (melos6: `dart run melos bootstrap`), `flutter build`, and the checks,
-# one PASS/FAIL line each.
+# get` (melos6, melos6_local: `dart run melos bootstrap`), `flutter build`,
+# and the checks, one PASS/FAIL line each.
 #
 # melos6 switches flavors in one copy, the way a developer does: first the
 # other flavor, then <flavor>, each with the CLI, `melos bootstrap`, the build
 # and the checks. Android only: on iOS, going from dev to prod in one copy
 # needs a manual `pod install` when prod has no plugin left (e2e/README.md).
+#
+# melos6_local, where ffo_probe itself is a melos package, starts with `melos
+# bootstrap`, which links the plugin, then runs <flavor>, the other flavor and
+# <flavor> again in one copy: the first with the CLI, `flutter pub get` in the
+# app only and the build, the others with the CLI, `melos bootstrap` and the
+# build; each with the checks. Android only, like melos6.
 #
 # Exit code: 0 only if every build succeeded and every check passed.
 #
@@ -72,11 +79,19 @@ while [[ $# -gt 0 ]]; do
 done
 [[ $# -eq 3 ]] || usage
 structure=$1 platform=$2 flavor=$3
-case $structure in single | workspace | path_modules | melos6) ;; *) usage ;; esac
+case $structure in single | workspace | path_modules | melos6 | melos6_local) ;; *) usage ;; esac
 case $platform in android | ios-cocoapods | ios-spm) ;; *) usage ;; esac
 case $flavor in dev | prod) ;; *) usage ;; esac
-if [[ $structure == melos6 && $platform != android ]]; then
-  echo "melos6 runs on android only" >&2
+melos=0
+[[ $structure == melos6 || $structure == melos6_local ]] && melos=1
+if [[ $melos -eq 1 && $platform != android ]]; then
+  echo "$structure runs on android only" >&2
+  exit 2
+fi
+if [[ $structure == melos6_local && $golden -eq 1 ]]; then
+  # Laying out the golden files removes melos's links, which the first build
+  # needs.
+  echo "melos6_local runs the CLI over the files of melos: no --golden" >&2
   exit 2
 fi
 
@@ -112,7 +127,7 @@ fixture=$work/e2e/$structure
 case $structure in
   single) app=$fixture; cli_dir=$fixture; pub_roots=("$fixture") ;;
   workspace) app=$fixture/app; cli_dir=$fixture; pub_roots=("$fixture") ;;
-  path_modules | melos6)
+  path_modules | melos6 | melos6_local)
     app=$fixture/app
     cli_dir=$fixture
     [[ $structure == path_modules ]] && cli_dir=$app
@@ -120,11 +135,15 @@ case $structure in
     ;;
 esac
 
-# melos6 first builds the other flavor in the same copy.
-flavors=("$flavor")
-if [[ $structure == melos6 ]]; then
-  if [[ $flavor == dev ]]; then flavors=(prod dev); else flavors=(dev prod); fi
-fi
+# melos6 first builds the other flavor in the same copy; melos6_local builds
+# <flavor>, the other one, then <flavor> again.
+other=dev
+[[ $flavor == dev ]] && other=prod
+case $structure in
+  melos6) flavors=("$other" "$flavor") ;;
+  melos6_local) flavors=("$flavor" "$other" "$flavor") ;;
+  *) flavors=("$flavor") ;;
+esac
 
 echo "== $structure $platform $flavor (copy: $work)"
 
@@ -212,7 +231,7 @@ fi
 # resolve TAG: dependencies of every package that resolves on its own.
 resolve() {
   local tag=$1 root log
-  if [[ $structure == melos6 ]]; then
+  if [[ $melos -eq 1 ]]; then
     log=$logs/$tag-melos-bootstrap.log
     echo "   dart run melos bootstrap (log: $log)"
     if ! (cd "$fixture" && dart run melos bootstrap) >"$log" 2>&1; then
@@ -223,13 +242,18 @@ resolve() {
     return
   fi
   for root in "${pub_roots[@]}"; do
-    log=$logs/$tag-pub-get-$(basename "$root").log
-    if ! (cd "$root" && flutter pub get) >"$log" 2>&1; then
-      echo "FAIL  flutter pub get in ${root#"$work"/} (log: $log)"
-      tail -n 20 "$log"
-      exit 1
-    fi
+    pub_get "$tag" "$root"
   done
+}
+
+# pub_get TAG ROOT: `flutter pub get` in ROOT.
+pub_get() {
+  local log=$logs/$1-pub-get-${2##*/}.log
+  if ! (cd "$2" && flutter pub get) >"$log" 2>&1; then
+    echo "FAIL  flutter pub get in ${2#"$work"/} (log: $log)"
+    tail -n 20 "$log"
+    exit 1
+  fi
 }
 
 # build TAG FLAVOR
@@ -273,6 +297,9 @@ require() {
 has() { [[ -f $2 ]] && grep -q -- "$1" "$2"; }
 lacks() { ! has "$@"; }
 starts_with() { [[ -f $2 ]] && [[ $(head -n 1 "$2") == "$1"* ]]; }
+# lists NAME LIST: the comma-separated LIST has NAME; unlists: it has not.
+lists() { [[ ,$2, == *,"$1",* ]]; }
+unlists() { ! lists "$@"; }
 ends_with() { [[ $2 == *"$1" ]]; }
 
 # The Android SDK: $ANDROID_HOME, $ANDROID_SDK_ROOT, or the default location of
@@ -293,13 +320,17 @@ android_tools() {
   [[ -n $tools ]] && echo "$tools"
 }
 
+# The packages whose resolution `check` looks at: pub_roots, or the app alone
+# when only the app has resolved since the CLI ran.
+checked_roots=("${pub_roots[@]}")
+
 # check TAG FLAVOR
 check() {
   local tag=$1 f=$2 root config uri got name
   if [[ $f == dev ]]; then want=present; else want=absent; fi
 
   # 1. Resolution: which ffo_probe pub picked, in every package that resolves.
-  for root in "${pub_roots[@]}"; do
+  for root in "${checked_roots[@]}"; do
     config=$root/.dart_tool/package_config.json
     uri=$({ grep -A1 '"name": "ffo_probe"' "$config" || true; } | sed -n 's/.*"rootUri": "\(.*\)".*/\1/p')
     case $uri in
@@ -312,7 +343,7 @@ check() {
   done
 
   # melos: its entries and ours share the app's file; melos's marker stays first.
-  if [[ $structure == melos6 ]]; then
+  if [[ $melos -eq 1 ]]; then
     local file=$app/pubspec_overrides.yaml
     require "melos: app/pubspec_overrides.yaml starts with melos's marker" \
       starts_with '# melos_managed_dependency_overrides: ' "$file"
@@ -322,6 +353,17 @@ check() {
     else
       require "melos: app/pubspec_overrides.yaml has no marker of ours" \
         lacks '^# flutter_flavor_overrides:' "$file"
+    fi
+    # melos6_local: melos links ffo_probe as well; in prod the CLI has taken
+    # that entry over, out of melos's marker into ours.
+    if [[ $structure == melos6_local ]]; then
+      local names
+      names=$(sed -n 's/^# melos_managed_dependency_overrides: //p' "$file" | head -n 1)
+      if [[ $f == prod ]]; then
+        require "melos: its marker ($names) does not list ffo_probe" unlists ffo_probe "$names"
+      else
+        require "melos: its marker ($names) lists ffo_probe" lists ffo_probe "$names"
+      fi
     fi
     uri=$({ grep -A1 '"name": "feature"' "$app/.dart_tool/package_config.json" || true; } |
       sed -n 's/.*"rootUri": "\(.*\)".*/\1/p')
@@ -418,11 +460,30 @@ check() {
 
 # --- run ----------------------------------------------------------------------
 
-for f in "${flavors[@]}"; do
+if [[ $structure == melos6_local ]]; then
+  echo "-- melos bootstrap, before the CLI"
+  resolve "$structure-$platform-0-bootstrap"
+fi
+for i in "${!flavors[@]}"; do
+  f=${flavors[$i]}
   tag="$structure-$platform-$f"
-  [[ ${#flavors[@]} -gt 1 ]] && echo "-- $f"
+  if [[ ${#flavors[@]} -gt 1 ]]; then
+    tag="$structure-$platform-$((i + 1))-$f"
+    echo "-- $f"
+  fi
   overrides "$f"
-  resolve "$tag"
+  if [[ $structure == melos6_local && $i -eq 0 ]]; then
+    # A plain pub get is enough after the CLI, but one is needed: `flutter
+    # build` skips its own while pubspec.yaml is older than pubspec.lock and
+    # package_config.json, whatever pubspec_overrides.yaml says (Flutter
+    # 3.44.8, flutter_tools lib/src/dart/pub.dart).
+    echo "   flutter pub get in app, not melos bootstrap"
+    pub_get "$tag" "$app"
+    checked_roots=("$app")
+  else
+    resolve "$tag"
+    checked_roots=("${pub_roots[@]}")
+  fi
   build "$tag" "$f"
   check "$tag" "$f"
 done

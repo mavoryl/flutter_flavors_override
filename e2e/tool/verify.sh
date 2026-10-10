@@ -6,7 +6,8 @@
 # Usage:
 #   e2e/tool/verify.sh [options] \
 #       <single|workspace|path_modules|melos6|melos6_local> \
-#       <android|ios-cocoapods|ios-spm> <dev|prod>
+#       <android|ios-cocoapods|ios-spm|macos-cocoapods|macos-spm|linux> \
+#       <dev|prod>
 #
 # Options:
 #   --golden         lay out the golden files from <fixture>/expected/<flavor>/
@@ -26,11 +27,13 @@
 # <repo>/bin/flutter_flavor_overrides.dart --flavor <flavor>`, from the app or
 # from the root of the workspace or melos repository. With --golden
 # it removes every pubspec_overrides.yaml in the copy instead and lays out the
-# golden files (the same tree as the fixture). For iOS it sets `flutter:
-# config: enable-swift-package-manager:` in the copy of the app's pubspec, so
-# the machine's global `flutter config` does not matter. Then `flutter pub
-# get` (melos6, melos6_local: `dart run melos bootstrap`), `flutter build`,
-# and the checks, one PASS/FAIL line each.
+# golden files (the same tree as the fixture). For iOS and macOS it sets
+# `flutter: config: enable-swift-package-manager:` in the copy of the app's
+# pubspec, so the machine's global `flutter config` does not matter. Then
+# `flutter pub get` (melos6, melos6_local: `dart run melos bootstrap`),
+# `flutter build`, and the checks, one PASS/FAIL line each. Flutter has no
+# flavors on Linux: there the flavor only picks the overrides, and the build
+# gets no --flavor.
 #
 # melos6 switches flavors in one copy, the way a developer does: first the
 # other flavor, then <flavor>, each with the CLI, `melos bootstrap`, the build
@@ -48,8 +51,9 @@
 # Needs: flutter and dart on PATH, git, tar, unzip, strings. The CLI needs
 # `dart pub get` in the repository; the script runs it when it is missing.
 # Android: an Android SDK with build-tools (dexdump, aapt2) in $ANDROID_HOME,
-# $ANDROID_SDK_ROOT, ~/Library/Android/sdk or ~/Android/Sdk. iOS: Xcode and
-# CocoaPods.
+# $ANDROID_SDK_ROOT, ~/Library/Android/sdk or ~/Android/Sdk. iOS and macOS:
+# Xcode and CocoaPods. Linux: what Flutter's Linux desktop builds need (clang,
+# cmake, ninja, pkg-config, the GTK 3 headers).
 
 set -euo pipefail
 
@@ -80,7 +84,10 @@ done
 [[ $# -eq 3 ]] || usage
 structure=$1 platform=$2 flavor=$3
 case $structure in single | workspace | path_modules | melos6 | melos6_local) ;; *) usage ;; esac
-case $platform in android | ios-cocoapods | ios-spm) ;; *) usage ;; esac
+case $platform in
+  android | ios-cocoapods | ios-spm | macos-cocoapods | macos-spm | linux) ;;
+  *) usage ;;
+esac
 case $flavor in dev | prod) ;; *) usage ;; esac
 melos=0
 [[ $structure == melos6 || $structure == melos6_local ]] && melos=1
@@ -94,6 +101,14 @@ if [[ $structure == melos6_local && $golden -eq 1 ]]; then
   echo "melos6_local runs the CLI over the files of melos: no --golden" >&2
   exit 2
 fi
+# os: android, ios, macos or linux. spm: the dependency manager on iOS and
+# macOS, Swift Package Manager (true) or CocoaPods (false).
+os=${platform%%-*}
+spm=''
+case $platform in
+  *-cocoapods) spm=false ;;
+  *-spm) spm=true ;;
+esac
 
 # --- the copy -----------------------------------------------------------------
 
@@ -205,16 +220,11 @@ overrides() {
   fi
 }
 
-# --- dependency manager on iOS --------------------------------------------------
+# --- dependency manager on iOS and macOS ----------------------------------------
 
 # Lines this script adds end with "# verify.sh", so a reused copy can drop them.
 pubspec=$app/pubspec.yaml
 awk '!/# verify\.sh$/' "$pubspec" >"$pubspec.tmp" && mv "$pubspec.tmp" "$pubspec"
-spm=''
-case $platform in
-  ios-cocoapods) spm=false ;;
-  ios-spm) spm=true ;;
-esac
 if [[ -n $spm ]]; then
   grep -q '^flutter:$' "$pubspec" || { echo "no 'flutter:' block in $pubspec" >&2; exit 2; }
   awk -v spm="$spm" '
@@ -262,6 +272,9 @@ build() {
   case $platform in
     android) command=(flutter build apk --release --flavor "$f") ;;
     ios-*) command=(flutter build ios --release --flavor "$f" --no-codesign) ;;
+    macos-*) command=(flutter build macos --release --flavor "$f") ;;
+    # No flavors on Linux: the flavor only picked the overrides.
+    linux) command=(flutter build linux --release) ;;
   esac
   echo "   ${command[*]} (log: $log)"
   if ! (cd "$app" && "${command[@]}") >"$log" 2>&1; then
@@ -301,6 +314,23 @@ starts_with() { [[ -f $2 ]] && [[ $(head -n 1 "$2") == "$1"* ]]; }
 lists() { [[ ,$2, == *,"$1",* ]]; }
 unlists() { ! lists "$@"; }
 ends_with() { [[ $2 == *"$1" ]]; }
+# lists_plugin SECTION FILE: the SECTION list (android, ios, macos, linux) of
+# a .flutter-plugins-dependencies has ffo_probe. Its entries are flat objects.
+lists_plugin() {
+  local list
+  [[ -f $2 ]] && list=$(grep -oE "\"$1\":\[(\{[^{}]*\},?)*\]" "$2") &&
+    [[ $list == *'"name":"ffo_probe"'* ]]
+}
+# cmake_lists_plugin FILE: FLUTTER_PLUGIN_LIST in a generated_plugins.cmake
+# has ffo_probe.
+cmake_lists_plugin() {
+  local list
+  [[ -f $1 ]] && list=$(awk '/^list\(APPEND FLUTTER_PLUGIN_LIST$/ { p = 1; next } p && /^\)/ { p = 0 } p' "$1") &&
+    grep -qx '  ffo_probe' <<<"$list"
+}
+
+# A string that only the plugin's native code for macOS or Linux has.
+marker=ffo_probe_native_marker_$os
 
 # The Android SDK: $ANDROID_HOME, $ANDROID_SDK_ROOT, or the default location of
 # Android Studio on macOS or Linux.
@@ -324,9 +354,9 @@ android_tools() {
 # when only the app has resolved since the CLI ran.
 checked_roots=("${pub_roots[@]}")
 
-# check TAG FLAVOR
+# check FLAVOR
 check() {
-  local tag=$1 f=$2 root config uri got name
+  local f=$1 root config uri got name
   if [[ $f == dev ]]; then want=present; else want=absent; fi
 
   # 1. Resolution: which ffo_probe pub picked, in every package that resolves.
@@ -373,89 +403,152 @@ check() {
 
   # 2. Flutter's plugin list. Flutter deletes the file when there are no plugins.
   local deps=$app/.flutter-plugins-dependencies
-  probe ".flutter-plugins-dependencies lists ffo_probe" has '"name":"ffo_probe"' "$deps"
+  probe ".flutter-plugins-dependencies lists ffo_probe for $os" lists_plugin "$os" "$deps"
 
   # 3. The generated registrant.
   local registrant
-  case $platform in
+  case $os in
     android) registrant=$app/android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java ;;
-    ios-*) registrant=$app/ios/Runner/GeneratedPluginRegistrant.m ;;
+    ios) registrant=$app/ios/Runner/GeneratedPluginRegistrant.m ;;
+    macos) registrant=$app/macos/Flutter/GeneratedPluginRegistrant.swift ;;
+    linux) registrant=$app/linux/flutter/generated_plugin_registrant.cc ;;
   esac
   require "${registrant#"$app"/} exists" test -f "$registrant"
   probe "${registrant#"$app"/} registers FfoProbePlugin" has FfoProbePlugin "$registrant"
+  if [[ $os == linux ]]; then
+    local cmake=$app/linux/flutter/generated_plugins.cmake
+    require "${cmake#"$app"/} exists" test -f "$cmake"
+    probe "${cmake#"$app"/} lists ffo_probe in FLUTTER_PLUGIN_LIST" cmake_lists_plugin "$cmake"
+  fi
 
   # 4. The artifact.
-  if [[ $platform == android ]]; then
-    local tools apk base_id want_id got_id dex classes strings_txt file
-    if ! tools=$(android_tools); then
-      fail "no build-tools with dexdump and aapt2 in the Android SDK '$android_sdk'"
-      exit 1
-    fi
-    apk=$app/build/app/outputs/flutter-apk/app-$f-release.apk
-    require "flavor: ${apk#"$app"/} exists" test -f "$apk"
-    base_id=$(sed -n 's/^ *applicationId = "\(.*\)"$/\1/p' "$app/android/app/build.gradle.kts")
-    if [[ $f == dev ]]; then want_id=$base_id.dev; else want_id=$base_id; fi
-    got_id=$("$tools/aapt2" dump packagename "$apk" 2>/dev/null || true)
-    require "flavor: application id is $want_id (got '$got_id')" test "$got_id" = "$want_id"
+  case $os in
+    android) check_apk "$f" ;;
+    ios | macos) check_xcode_app "$f" ;;
+    linux) check_linux_bundle ;;
+  esac
+}
 
-    dex=$(mktemp -d "$work/dex.XXXXXX")
-    unzip -q -o "$apk" 'classes*.dex' -d "$dex"
-    classes=$dex/classes.txt
-    strings_txt=$dex/strings.txt
-    : >"$classes"
-    : >"$strings_txt"
-    for file in "$dex"/classes*.dex; do
-      "$tools/dexdump" "$file" 2>/dev/null | sed -n "s/^  Class descriptor  : '\(.*\)'$/\1/p" >>"$classes"
-      strings -a "$file" >>"$strings_txt"
-    done
-    require "dex: classes listed ($(wc -l <"$classes" | tr -d ' '))" test -s "$classes"
-    probe "dex: class io.github.mavoryl.ffo_probe.FfoProbePlugin" \
-      grep -q '^Lio/github/mavoryl/ffo_probe/FfoProbePlugin;$' "$classes"
-    probe "dex: package io.github.mavoryl.ffo_probe" grep -q '^Lio/github/mavoryl/ffo_probe/' "$classes"
-    # A literal from the plugin's Kotlin code: R8 renames classes, not strings.
-    probe "dex: string getPlatformVersion" grep -q '^getPlatformVersion$' "$strings_txt"
-  else
-    local ios=$app/ios runner_app=$app/build/ios/iphoneos/Runner.app bundle_id
+# check_apk FLAVOR
+check_apk() {
+  local f=$1
+  local tools apk base_id want_id got_id dex classes strings_txt file
+  if ! tools=$(android_tools); then
+    fail "no build-tools with dexdump and aapt2 in the Android SDK '$android_sdk'"
+    exit 1
+  fi
+  apk=$app/build/app/outputs/flutter-apk/app-$f-release.apk
+  require "flavor: ${apk#"$app"/} exists" test -f "$apk"
+  base_id=$(sed -n 's/^ *applicationId = "\(.*\)"$/\1/p' "$app/android/app/build.gradle.kts")
+  if [[ $f == dev ]]; then want_id=$base_id.dev; else want_id=$base_id; fi
+  got_id=$("$tools/aapt2" dump packagename "$apk" 2>/dev/null || true)
+  require "flavor: application id is $want_id (got '$got_id')" test "$got_id" = "$want_id"
+
+  dex=$(mktemp -d "$work/dex.XXXXXX")
+  unzip -q -o "$apk" 'classes*.dex' -d "$dex"
+  classes=$dex/classes.txt
+  strings_txt=$dex/strings.txt
+  : >"$classes"
+  : >"$strings_txt"
+  for file in "$dex"/classes*.dex; do
+    "$tools/dexdump" "$file" 2>/dev/null | sed -n "s/^  Class descriptor  : '\(.*\)'$/\1/p" >>"$classes"
+    strings -a "$file" >>"$strings_txt"
+  done
+  require "dex: classes listed ($(wc -l <"$classes" | tr -d ' '))" test -s "$classes"
+  probe "dex: class io.github.mavoryl.ffo_probe.FfoProbePlugin" \
+    grep -q '^Lio/github/mavoryl/ffo_probe/FfoProbePlugin;$' "$classes"
+  probe "dex: package io.github.mavoryl.ffo_probe" grep -q '^Lio/github/mavoryl/ffo_probe/' "$classes"
+  # A literal from the plugin's Kotlin code: R8 renames classes, not strings.
+  probe "dex: string getPlatformVersion" grep -q '^getPlatformVersion$' "$strings_txt"
+}
+
+# check_xcode_app FLAVOR: the iOS or macOS app.
+check_xcode_app() {
+  local f=$1 xcode=$app/$os deps=$app/.flutter-plugins-dependencies
+  local bundle frameworks binary label bundle_id
+  if [[ $os == ios ]]; then
+    bundle=$app/build/ios/iphoneos/Runner.app
+    frameworks=$bundle/Frameworks
+    binary=$bundle/Runner
+    label=Runner
     require "flavor: build/ios/Release-$f-iphoneos exists (configuration Release-$f)" \
       test -d "$app/build/ios/Release-$f-iphoneos"
-    require "build/ios/iphoneos/Runner.app exists" test -d "$runner_app"
-    bundle_id=$(plutil -extract CFBundleIdentifier raw "$runner_app/Info.plist" 2>/dev/null || true)
+    require "build/ios/iphoneos/Runner.app exists" test -d "$bundle"
+    bundle_id=$(plutil -extract CFBundleIdentifier raw "$bundle/Info.plist" 2>/dev/null || true)
     if [[ $f == dev ]]; then
       require "flavor: bundle id $bundle_id ends with .dev" test "${bundle_id%.dev}" != "$bundle_id"
     else
       require "flavor: bundle id $bundle_id has no .dev suffix" test -n "$bundle_id" -a "${bundle_id%.dev}" = "$bundle_id"
     fi
-
-    local package_swift=$ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
-    local podfile_lock=$ios/Podfile.lock frameworks=$runner_app/Frameworks
-    # Which dependency manager Flutter used, provable with and without plugins:
-    # with Swift Package Manager on, Flutter generates the plugins package with a
-    # FlutterFramework dependency; with it off, an empty package (the fixtures'
-    # Xcode projects are already integrated). Without plugins Flutter skips
-    # `pod install` altogether, so a missing Podfile.lock is fine in prod.
-    if [[ -f $deps ]]; then
-      require "mechanism: .flutter-plugins-dependencies has swift_package_manager_enabled ios=$spm" \
-        has "\"swift_package_manager_enabled\":{\"ios\":$spm" "$deps"
-    fi
-    if [[ $platform == ios-cocoapods ]]; then
-      require "mechanism: FlutterGeneratedPluginSwiftPackage has no FlutterFramework dependency" \
-        lacks FlutterFramework "$package_swift"
-      require "mechanism: FlutterGeneratedPluginSwiftPackage does not list ffo_probe" \
-        lacks ffo_probe "$package_swift"
-      probe "CocoaPods: Podfile.lock has ffo_probe" has ffo_probe "$podfile_lock"
-      probe "CocoaPods: Runner.app/Frameworks/ffo_probe.framework" test -d "$frameworks/ffo_probe.framework"
-    else
-      require "mechanism: FlutterGeneratedPluginSwiftPackage depends on FlutterFramework" \
-        has FlutterFramework "$package_swift"
-      require "mechanism: Podfile.lock does not list ffo_probe" lacks ffo_probe "$podfile_lock"
-      require "mechanism: no Runner.app/Frameworks/ffo_probe.framework" test ! -e "$frameworks/ffo_probe.framework"
-      probe "SwiftPM: FlutterGeneratedPluginSwiftPackage lists ffo_probe" has ffo_probe "$package_swift"
-    fi
-    local symbols=$work/runner-symbols-$tag.txt
-    strings -a "$runner_app/Runner" >"$symbols" 2>/dev/null || true
-    require "Runner binary readable" test -s "$symbols"
-    probe "Runner binary mentions FfoProbePlugin" grep -q FfoProbePlugin "$symbols"
+  else
+    # The app's name and base bundle id: Runner/Configs/AppInfo.xcconfig.
+    local app_info=$xcode/Runner/Configs/AppInfo.xcconfig name base_id want_id products
+    name=$(sed -n 's/^PRODUCT_NAME = //p' "$app_info")
+    base_id=$(sed -n 's/^PRODUCT_BUNDLE_IDENTIFIER = //p' "$app_info")
+    products=$app/build/macos/Build/Products/Release-$f
+    bundle=$products/$name.app
+    frameworks=$bundle/Contents/Frameworks
+    binary=$bundle/Contents/MacOS/$name
+    label=$name.app/Contents/MacOS/$name
+    require "flavor: ${products#"$app"/} exists (configuration Release-$f)" test -d "$products"
+    require "${bundle#"$app"/} exists" test -n "$name" -a -d "$bundle"
+    if [[ $f == dev ]]; then want_id=$base_id.dev; else want_id=$base_id; fi
+    bundle_id=$(plutil -extract CFBundleIdentifier raw "$bundle/Contents/Info.plist" 2>/dev/null || true)
+    require "flavor: bundle id is $want_id (got '$bundle_id')" test -n "$base_id" -a "$bundle_id" = "$want_id"
   fi
+
+  local package_swift=$xcode/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift
+  local podfile_lock=$xcode/Podfile.lock framework=${frameworks#"${bundle%/*}"/}/ffo_probe.framework
+  # Which dependency manager Flutter used, provable with and without plugins:
+  # with Swift Package Manager on, Flutter generates the plugins package with a
+  # FlutterFramework dependency; with it off, an empty package (the fixtures'
+  # Xcode projects are already integrated). Without plugins Flutter skips
+  # `pod install` altogether, so a missing Podfile.lock is fine in prod.
+  if [[ -f $deps ]]; then
+    require "mechanism: .flutter-plugins-dependencies has swift_package_manager_enabled $os=$spm" \
+      grep -Eq "\"swift_package_manager_enabled\":\{[^}]*\"$os\":${spm}[,}]" "$deps"
+  fi
+  if [[ $spm == false ]]; then
+    require "mechanism: FlutterGeneratedPluginSwiftPackage has no FlutterFramework dependency" \
+      lacks FlutterFramework "$package_swift"
+    require "mechanism: FlutterGeneratedPluginSwiftPackage does not list ffo_probe" \
+      lacks ffo_probe "$package_swift"
+    probe "CocoaPods: Podfile.lock has ffo_probe" has ffo_probe "$podfile_lock"
+    probe "CocoaPods: $framework" test -d "${bundle%/*}/$framework"
+  else
+    require "mechanism: FlutterGeneratedPluginSwiftPackage depends on FlutterFramework" \
+      has FlutterFramework "$package_swift"
+    require "mechanism: Podfile.lock does not list ffo_probe" lacks ffo_probe "$podfile_lock"
+    require "mechanism: no $framework" test ! -e "${bundle%/*}/$framework"
+    probe "SwiftPM: FlutterGeneratedPluginSwiftPackage lists ffo_probe" has ffo_probe "$package_swift"
+  fi
+  require "$label binary exists" test -s "$binary"
+  # The whole file, not what `strings` shows (on macOS only C strings in
+  # sections): the plugin's class is in the binary's imports with CocoaPods, in
+  # its class names with SwiftPM, and the Swift registrant of macOS keeps the
+  # short literal "FfoProbePlugin" inline in the code.
+  probe "$label binary mentions FfoProbePlugin" grep -qF FfoProbePlugin "$binary"
+  if [[ $os == macos ]]; then
+    # In the plugin's framework with CocoaPods, in the app binary with SwiftPM.
+    probe "${bundle##*/} has the string $marker" grep -rqF -- "$marker" "$bundle"
+  fi
+}
+
+# check_linux_bundle: the Linux bundle.
+check_linux_bundle() {
+  local name bundle binary
+  name=$(sed -n 's/^set(BINARY_NAME "\(.*\)")$/\1/p' "$app/linux/CMakeLists.txt")
+  # build/linux/<x64|arm64>/release/bundle
+  bundle=$(find "$app/build/linux" -mindepth 3 -maxdepth 3 -type d -path '*/release/bundle' 2>/dev/null | head -n 1 || true)
+  require "build/linux/<arch>/release/bundle exists (${bundle#"$app"/})" test -n "$bundle" -a -d "$bundle"
+  binary=$bundle/$name
+  require "bundle/$name binary exists" test -n "$name" -a -s "$binary"
+  probe "bundle/lib/libffo_probe_plugin.so" test -f "$bundle/lib/libffo_probe_plugin.so"
+  probe "bundle has the string $marker" grep -rqF -- "$marker" "$bundle"
+  # The binary's dynamic section names the library it needs, and the
+  # registrant's literal names the plugin.
+  probe "bundle/$name binary needs libffo_probe_plugin.so" grep -qF libffo_probe_plugin.so "$binary"
+  probe "bundle/$name binary mentions FfoProbePlugin" grep -qF FfoProbePlugin "$binary"
 }
 
 # --- run ----------------------------------------------------------------------
@@ -485,7 +578,7 @@ for i in "${!flavors[@]}"; do
     checked_roots=("${pub_roots[@]}")
   fi
   build "$tag" "$f"
-  check "$tag" "$f"
+  check "$f"
 done
 
 echo "== $structure $platform $flavor: $([[ $failures -eq 0 ]] && echo PASS || echo "FAIL ($failures)")"

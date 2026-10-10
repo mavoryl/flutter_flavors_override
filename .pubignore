@@ -32,3 +32,7 @@ pubspec.lock
 
 # End-to-end fixtures: Flutter apps, a test plugin and its stub. Root-anchored.
 /e2e/
+
+# Lints for developing this package; consumers don't have its dev dependency
+# package:lints, and pana analyzes with its own options.
+/analysis_options.yaml

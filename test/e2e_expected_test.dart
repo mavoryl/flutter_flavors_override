@@ -65,7 +65,7 @@ void main() {
           flavor == 'prod'
               ? isEmpty
               : 'flutter_flavor_overrides: no flavor_overrides for flavor '
-                  '`$flavor` in this project\n',
+                  '`$flavor` in this project. Declared flavors: prod.\n',
         );
         expect(code, 0, reason: out.toString());
         expect(

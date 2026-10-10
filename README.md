@@ -143,8 +143,16 @@ file returns to what it was before; a file left with nothing but what the tool w
 
 Status lines and `--list-dependents` print paths relative to the directory the tool runs in
 (after `-C`); error messages name files by absolute path. If no pubspec
-in the project declares the selected flavor, the tool says so on stderr — a typo in `--flavor`
-is visible — and still exits `0`.
+in the project declares the selected flavor, the tool says so on stderr, suggests close matches
+and lists the flavors it found, and still exits `0`:
+
+```console
+$ flutter_flavor_overrides --flavor prd
+flutter_flavor_overrides: no flavor_overrides for flavor `prd` in this project. Did you mean `prod`? Declared flavors: develop, prod.
+```
+
+A flavor that deliberately has no overrides can be declared empty (`develop:` with nothing
+under it) to keep the log quiet.
 
 Exit codes: `0` success, `64` invalid usage, `1` a problem in the project or declarations (the
 message names the file). Problems in the project or the declarations are found before any file

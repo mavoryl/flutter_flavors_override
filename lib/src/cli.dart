@@ -6,6 +6,7 @@ import 'package:yaml/yaml.dart';
 
 import 'declarations.dart';
 import 'errors.dart';
+import 'flavor_hint.dart';
 import 'local_package.dart' show canonicalDir, toPlain;
 import 'overrides_file.dart';
 import 'paths.dart';
@@ -113,12 +114,12 @@ Future<int> run(
       errors.writeln('$_name: warning: $warning');
     }
     // Most likely a typo in --flavor; still a valid run, which removes ours.
-    if (flavor != null &&
-        !project.packages.values
-            .any((package) => package.flavorOverrides.containsKey(flavor))) {
-      errors.writeln(
-        '$_name: no flavor_overrides for flavor `$flavor` in this project',
-      );
+    final declared = [
+      for (final package in project.packages.values)
+        ...package.flavorOverrides.keys,
+    ];
+    if (flavor != null && !declared.contains(flavor)) {
+      errors.writeln('$_name: ${missingFlavorNote(flavor, declared)}');
     }
     String relative(String path) => _relative(path, from: start);
 

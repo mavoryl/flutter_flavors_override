@@ -497,7 +497,8 @@ flavor_overrides:
 
   group('a flavor without flavor_overrides anywhere in the project', () {
     const note = 'flutter_flavor_overrides: no flavor_overrides for flavor '
-        '`prdo` in this project\n';
+        '`prdo` in this project. Did you mean `prod`? '
+        'Declared flavors: prod.\n';
 
     test('is noted on stderr; our entries still go', () async {
       singlePackage();

@@ -224,9 +224,13 @@ a:
   hosted_map: {hosted: {name: a, url: https://pub.example.com}}
   sdk: {sdk: flutter}
   sdk_version: {sdk: flutter, version: any}
+  version_only: {version: ^1.0.0}
 ''');
 
-        expect(config.flavors, hasLength(9));
+        expect(config.flavors, hasLength(10));
+        expect(config.forFlavor('version_only'), {
+          'a': {'version': '^1.0.0'},
+        });
         expect(config.forFlavor('git_map'), {
           'a': {
             'git': {
@@ -266,7 +270,6 @@ a:
       test('not exactly one source', () {
         expectSpecError('{path: a, git: b}', ['`a.prod`', 'one source']);
         expectSpecError('{}', ['`a.prod`', 'one source']);
-        expectSpecError('{version: ^1.0.0}', ['`a.prod`', 'one source']);
       });
 
       test('an unknown key', () {
@@ -277,6 +280,7 @@ a:
       test('a version beside path:, or not a string', () {
         expectSpecError('{path: a, version: 1.0.0}', ['`a.prod.version`']);
         expectSpecError('{sdk: flutter, version: 3}', ['`a.prod.version`']);
+        expectSpecError('{version: 3}', ['`a.prod.version`', 'string']);
       });
 
       test('an empty version string', () {

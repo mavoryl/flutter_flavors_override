@@ -133,9 +133,10 @@ const _hostedKeys = {'name', 'url'};
 /// `path` (a string), `git` (a string, or a map with a string `url` and
 /// optional string `ref`, `path`, `tag_pattern`), `hosted` (a string, or a
 /// map with optional string `name`, `url`) and `sdk` (a string), plus an
-/// optional string `version` beside `git`, `hosted` or `sdk`. Every key, at
-/// every level, is a string. What the strings say (version syntax, URLs,
-/// paths) is pub's to check.
+/// optional string `version` beside `git`, `hosted` or `sdk`; or a map with
+/// only a string `version` (hosted, as pub reads it). Every key, at every
+/// level, is a string. What the strings say (version syntax, URLs, paths) is
+/// pub's to check.
 void _checkSpec(
   YamlNode node,
   String place,
@@ -156,21 +157,26 @@ void _checkSpec(
   for (final key in keys) {
     if (!_sources.contains(key) && key != 'version') {
       fail('`$place.$key` is not a key of a dependency spec: one of '
-          '${_sources.join(', ')}, and `version` beside git, hosted or sdk.');
+          '${_sources.join(', ')}, and `version`, alone or beside git, hosted '
+          'or sdk.');
     }
   }
-  final sources = keys.where(_sources.contains).toList();
-  if (sources.length != 1) {
-    fail('`$place` must name exactly one source, one of '
-        '${_sources.join(', ')}${sources.isEmpty ? '' : ', not '
-            '${sources.join(' and ')}'}; a version from pub.dev is a plain '
-        'string.');
-  }
-  final source = sources.single;
-
   void string(YamlNode value, String at) {
     if (value.value is! String) fail('`$at` must be a string.');
   }
+
+  final sources = keys.where(_sources.contains).toList();
+  final version = node.nodes['version'];
+  // `version` alone: a hosted package, as pub reads it.
+  if (sources.isEmpty && version != null) {
+    return string(version, '$place.version');
+  }
+  if (sources.length != 1) {
+    fail('`$place` must name exactly one source, one of '
+        '${_sources.join(', ')}${sources.isEmpty ? '' : ', not '
+            '${sources.join(' and ')}'}.');
+  }
+  final source = sources.single;
 
   /// A string, or a map of string values under the keys in [allowed].
   void stringOrMap(YamlNode value, String at, Set<String> allowed) {
@@ -186,7 +192,6 @@ void _checkSpec(
     }
   }
 
-  final version = node.nodes['version'];
   if (version != null) {
     if (source == 'path') {
       fail('`$place.version`: a path dependency takes no version.');

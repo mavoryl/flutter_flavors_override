@@ -53,8 +53,8 @@ root, the melos root, or the app itself (a single package, or an app with module
 - The value is a normal dependency spec: `path:`, `git:`, a hosted version string, `sdk:`, or empty
   (any version from pub.dev). Before writing anything, the tool checks the shape of every spec in
   every flavor: a map names exactly one source (`path`, `git`, `hosted` or `sdk`) with string
-  values, and `version` only beside `git`, `hosted` or `sdk`; a version from pub.dev alone is a
-  plain string. What the strings say is left to pub.
+  values, and `version` beside `git`, `hosted` or `sdk`, or alone (a version from pub.dev). What
+  the strings say is left to pub.
 - Relative paths are relative to `flavor_overrides.yaml`; the tool rebases them for every file it
   writes.
 - A package without an entry for a flavor keeps the real package in that flavor. A typo in a
@@ -68,8 +68,9 @@ root, the melos root, or the app itself (a single package, or an app with module
 - One file per project: the tool finds it from the directory it runs in, going up, and its
   directory is the project root. A `flavor_overrides.yaml` in another package of the project
   inside that directory, or a `flavor_overrides` section left in a pubspec there, is an error,
-  whichever directory the tool runs from. A package outside it, such as a sibling repository
-  reached through `path:`, is a project of its own and keeps its own file.
+  whichever directory the tool runs from. In a package outside it, such as a sibling repository
+  or a module next to the app reached through `path:`, both are ignored with a warning: such a
+  file would define a separate project.
 
 Flavor keys are just labels matched against `--flavor`; they don't have to match your Flutter
 flavors. To vary overrides by build mode too, use composite keys such as `prodRelease` and
@@ -223,7 +224,8 @@ Exit codes: `0` success, `64` invalid usage, `1` a problem in the project or in
 `flavor_overrides.yaml` (the message names the file). Such problems are found before any file is
 written, so they leave the project untouched. Warnings (`flutter_flavor_overrides: warning: …`)
 do not stop a run: an override no package uses, a `pubspec.lock` that cannot be read, a `path:`
-dependency on a directory that does not exist yet.
+dependency on a directory that does not exist yet, a `flavor_overrides.yaml` or a
+`flavor_overrides` section in a package outside the project root.
 
 ## Check stubs on pull requests
 

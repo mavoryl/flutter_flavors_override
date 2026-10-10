@@ -327,31 +327,79 @@ dependencies:
       });
     });
 
-    test('a package outside the root directory keeps its own', () async {
-      // A sibling repository, reached through path:, that uses the tool
-      // itself: its file and a section left in its pubspec are its own.
-      project.pubspec('app', '''
+    group('outside the root directory: a warning, the run goes on', () {
+      /// The warnings for a config file and a pubspec section in the
+      /// package in [dir], outside the root `app`.
+      String warnings(String dir) => 'flutter_flavor_overrides: warning: '
+          '${project.path('$dir/flavor_overrides.yaml')}: ignored — outside '
+          'the project root ${project.path('app')}; it would define a '
+          'separate project\n'
+          'flutter_flavor_overrides: warning: '
+          '${project.path('$dir/pubspec.yaml')}: the flavor_overrides '
+          'section is ignored — declarations live in '
+          '${project.path('app/flavor_overrides.yaml')}\n';
+
+      test('in a sibling repository reached through path:', () async {
+        project.pubspec('app', '''
 name: app
 dependencies:
   ffo_probe: 1.0.0
   shared:
     path: ../other_repo/shared
 ''');
-      project.pubspec('other_repo/shared', '''
+        project.pubspec('other_repo/shared', '''
 name: shared
 flavor_overrides:
   prod:
     other_plugin: 1.0.0
 ''');
-      project.config('other_repo/shared', 'other_plugin:\n  qa: 1.0.0\n');
-      probeConfig('app', '../stubs/ffo_probe');
+        project.config('other_repo/shared', 'other_plugin:\n  qa: 1.0.0\n');
+        probeConfig('app', '../stubs/ffo_probe');
 
-      final result = await cli(['--flavor', 'prod'], dir: 'app');
+        final result = await cli(['--flavor', 'prod'], dir: 'app');
 
-      expect(result.err, isEmpty);
-      expect(result.code, 0);
-      expect(result.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
-      expect(read('app/pubspec_overrides.yaml'), probeFile);
+        expect(result.err, warnings('other_repo/shared'));
+        expect(result.code, 0);
+        expect(result.out, 'wrote pubspec_overrides.yaml (ffo_probe)\n');
+        expect(read('app/pubspec_overrides.yaml'), probeFile);
+      });
+
+      test('in a path: module next to the app directory', () async {
+        project.pubspec('app', '''
+name: app
+dependencies:
+  feature:
+    path: ../packages/feature
+''');
+        project.pubspec('packages/feature', '''
+name: feature
+dependencies:
+  ffo_probe: 1.0.0
+flavor_overrides:
+  prod:
+    ffo_probe:
+      path: ../../stubs/ffo_probe
+''');
+        probeConfig('packages/feature', '../../stubs/ffo_probe');
+        probeConfig('app', '../stubs/ffo_probe');
+
+        final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+        expect(result.err, warnings('packages/feature'));
+        expect(result.code, 0);
+        expect(
+          result.out,
+          'wrote pubspec_overrides.yaml (ffo_probe)\n'
+          'wrote ../packages/feature/pubspec_overrides.yaml (ffo_probe)\n',
+        );
+
+        final listed = await cli(
+          ['--flavor', 'prod', '--list-dependents'],
+          dir: 'app',
+        );
+        expect(listed.err, warnings('packages/feature'));
+        expect(listed.out, '../packages/feature\n');
+      });
     });
 
     group('one in a directory above', () {

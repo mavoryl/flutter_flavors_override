@@ -141,7 +141,8 @@ Future<int> run(
     for (final warning in project.warnings) {
       errors.writeln('$_name: warning: $warning');
     }
-    _checkProject(project, config?.path);
+    _checkProject(project, config?.path, warnings: warnings);
+    printWarnings();
     if (config == null && !clean) throw _noConfig(start);
 
     // Most likely a typo in --flavor; still a valid run, which removes ours.
@@ -231,35 +232,52 @@ void _checkAncestors(OverridesConfig config) {
 /// One flavor_overrides.yaml per project, next to the root pubspec.yaml (the
 /// one at [configPath], or none), and no `flavor_overrides` left in a
 /// pubspec: the same errors whichever directory the tool runs from. Only
-/// local packages inside the directory of the root count; those outside it,
-/// such as a sibling repository reached through `path:`, are projects of
-/// their own.
-void _checkProject(Project project, String? configPath) {
+/// local packages inside the directory of the root count; in those outside
+/// it, such as a sibling repository reached through `path:`, a config file
+/// or a section is ignored with a note in [warnings].
+void _checkProject(
+  Project project,
+  String? configPath, {
+  List<String>? warnings,
+}) {
   final root = project.root;
   bool inside(String dir) => dir == root.dir || p.isWithin(root.dir, dir);
   final configDir = configPath == null ? null : p.dirname(configPath);
+  final dirs = project.packages.keys.toList()..sort();
   final misplaced = [
     if (configPath != null && configDir != root.dir) configPath,
-    for (final dir in project.packages.keys.toList()..sort())
-      if (dir != root.dir &&
-          dir != configDir &&
-          inside(dir) &&
-          File(p.join(dir, configFileName)).existsSync())
-        p.join(dir, configFileName),
   ];
+  final outside = <String>[];
+  for (final dir in dirs) {
+    if (dir == root.dir || dir == configDir) continue;
+    final file = p.join(dir, configFileName);
+    if (File(file).existsSync()) (inside(dir) ? misplaced : outside).add(file);
+  }
   if (misplaced.isNotEmpty) throw _misplaced(misplaced.first, project);
 
-  final expected = p.join(root.dir, configFileName);
-  for (final dir in project.packages.keys.toList()..sort()) {
+  final expected = configPath ?? p.join(root.dir, configFileName);
+  final sections = <String>[];
+  for (final dir in dirs) {
     final package = project.packages[dir]!;
-    if (inside(dir) && package.hasFlavorOverridesSection) {
-      throw FlavorOverridesException(
-        '${package.pubspecPath}: `flavor_overrides` in a pubspec is not '
-        'read: move it to $expected (package, then flavor, then dependency '
-        'spec).',
-      );
+    if (!package.hasFlavorOverridesSection) continue;
+    if (!inside(dir)) {
+      sections.add(package.pubspecPath);
+      continue;
     }
+    throw FlavorOverridesException(
+      '${package.pubspecPath}: `flavor_overrides` in a pubspec is not '
+      'read: move it to $expected (package, then flavor, then dependency '
+      'spec).',
+    );
   }
+  warnings?.addAll([
+    for (final file in outside)
+      '$file: ignored — outside the project root ${root.dir}; it would '
+          'define a separate project',
+    for (final pubspec in sections)
+      '$pubspec: the flavor_overrides section is ignored — declarations '
+          'live in $expected',
+  ]);
 }
 
 /// A pubspec_overrides.yaml to write ([text]) or remove (null text).

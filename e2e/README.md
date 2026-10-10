@@ -2,8 +2,8 @@
 
 Real Flutter builds that check the idea behind `flutter_flavor_overrides`: a
 `pubspec_overrides.yaml` that swaps a plugin for a no-op stub keeps the
-plugin's native code out of a flavor's Android and iOS build, and leaving the
-file out brings it back.
+plugin's native code out of a flavor's Android, iOS, macOS and Linux build,
+and leaving the file out brings it back.
 
 None of this is part of the published package (`/e2e/` is in `.pubignore`) or
 of the root package's analysis (`analysis_options.yaml` excludes it).
@@ -12,7 +12,8 @@ of the root package's analysis (`analysis_options.yaml` excludes it).
 
 ```
 e2e/
-├── plugins/ffo_probe/   test plugin with native code (Android, iOS: podspec and Package.swift)
+├── plugins/ffo_probe/   test plugin with native code (Android; iOS and macOS: podspec and
+│                        Package.swift; Linux)
 ├── stubs/ffo_probe/     its no-op stub: same name and Dart API, no `flutter: plugin:`
 ├── single/              one app package that depends on ffo_probe
 ├── workspace/           pub workspace: app/ -> packages/feature/ -> ffo_probe
@@ -22,7 +23,7 @@ e2e/
 └── tool/
     ├── verify.sh              builds a fixture and checks the plugin's footprint
     ├── smoke_min_flutter.sh   pub-level smoke test on the oldest supported Flutter
-    └── add_ios_flavors.rb     adds the iOS flavor configurations and schemes
+    └── add_xcode_flavors.rb   adds the iOS and macOS flavor configurations and schemes
 ```
 
 The package that depends on `ffo_probe` declares the override for `prod`, with
@@ -50,7 +51,7 @@ melos`, never activated globally), `melos.yaml` lists `app` and `packages/*`,
 and the app depends on `feature: 0.0.1` by version, so only `melos bootstrap`
 links it to `packages/feature`, through the app's `pubspec_overrides.yaml`.
 That file then holds the entries of melos and of the CLI side by side, each
-under its own marker comment. `melos6` has no iOS project.
+under its own marker comment. `melos6` has no iOS, macOS or Linux project.
 
 `melos6_local` is the same, except that the plugin to swap is a melos package
 itself: its `melos.yaml` lists `../*/ffo_probe` besides `app` and
@@ -59,7 +60,8 @@ itself: its `melos.yaml` lists `../*/ffo_probe` besides `app` and
 which has the plugin's name; melos refuses two packages with one name, so
 `ignore:` leaves out `../stubs/*`. In `prod` the CLI takes melos's entry for
 `ffo_probe` over: the name leaves melos's marker for ours, and `melos
-bootstrap` then leaves the entry alone. It has no iOS project either.
+bootstrap` then leaves the entry alone. It has no iOS, macOS or Linux project
+either.
 
 ## Flavors
 
@@ -67,15 +69,20 @@ Each app has the flavors `dev` and `prod`:
 
 - Android: `productFlavors` with dimension `env` in
   `android/app/build.gradle.kts`; `dev` has the application id suffix `.dev`.
-- iOS: build configurations `Debug-<flavor>`, `Release-<flavor>`,
+- iOS and macOS: build configurations `Debug-<flavor>`, `Release-<flavor>`,
   `Profile-<flavor>` and shared schemes `dev` and `prod`, added by
-  `tool/add_ios_flavors.rb` (needs the `xcodeproj` gem, which ships with
-  CocoaPods); `dev` has the bundle id suffix `.dev`.
+  `tool/add_xcode_flavors.rb` (needs the `xcodeproj` gem, which ships with
+  CocoaPods); `dev` has the bundle id suffix `.dev` (on macOS
+  `$(inherited).dev`: the bundle id lives in `Runner/Configs/AppInfo.xcconfig`).
+- Linux: none. Flutter has no flavors on Linux, `flutter build linux` takes no
+  `--flavor`; the flavor only picks the overrides, so the CLI and the checks
+  still tell `dev` from `prod`.
 
 ## Running
 
 ```bash
-e2e/tool/verify.sh <single|workspace|path_modules|melos6|melos6_local> <android|ios-cocoapods|ios-spm> <dev|prod>
+e2e/tool/verify.sh <single|workspace|path_modules|melos6|melos6_local> \
+    <android|ios-cocoapods|ios-spm|macos-cocoapods|macos-spm|linux> <dev|prod>
 ```
 
 The script never builds in the repository. It copies `e2e/` (the files a fresh
@@ -88,27 +95,44 @@ the overrides exist. Then it runs `flutter pub get` (at the workspace root for
 `workspace`, in the app and the feature package for `path_modules`; `dart run
 melos bootstrap` for `melos6` and `melos6_local`) and builds the app:
 
-- `flutter build apk --release --flavor <flavor>`, or
-- `flutter build ios --release --flavor <flavor> --no-codesign`, after setting
+- `flutter build apk --release --flavor <flavor>`,
+- `flutter build ios --release --flavor <flavor> --no-codesign` or
+  `flutter build macos --release --flavor <flavor>`, after setting
   `flutter: config: enable-swift-package-manager:` in the copy of the app's
-  pubspec (`false` for `ios-cocoapods`, `true` for `ios-spm`), so the
-  machine's global `flutter config` does not matter.
+  pubspec (`false` for `*-cocoapods`, `true` for `*-spm`), so the machine's
+  global `flutter config` does not matter, or
+- `flutter build linux --release`, without `--flavor`.
 
 Then it prints one `PASS`/`FAIL` line per check and exits with 0 only if all
 passed. In `dev` the plugin must be found, in `prod` it must not:
 
 - `.dart_tool/package_config.json` of every package that resolves points
   `ffo_probe` at the plugin (in `prod`: at the stub);
-- `.flutter-plugins-dependencies` lists `ffo_probe`;
-- `GeneratedPluginRegistrant` (`.java` or `.m`) registers `FfoProbePlugin`;
+- `.flutter-plugins-dependencies` lists `ffo_probe` for the platform;
+- the generated registrant registers `FfoProbePlugin`:
+  `GeneratedPluginRegistrant.java` (Android), `.m` (iOS), `.swift` (macOS),
+  `linux/flutter/generated_plugin_registrant.cc`; on Linux also
+  `linux/flutter/generated_plugins.cmake` has `ffo_probe` in
+  `FLUTTER_PLUGIN_LIST`;
 - Android: the APK's dex has the class
   `io.github.mavoryl.ffo_probe.FfoProbePlugin` and the plugin's string
   `getPlatformVersion`;
-- iOS with CocoaPods: `Podfile.lock` has `ffo_probe`,
-  `Runner.app/Frameworks/ffo_probe.framework` exists;
-- iOS with Swift Package Manager: the generated
+- iOS and macOS with CocoaPods: `Podfile.lock` has `ffo_probe`, the app's
+  `Frameworks` (`Runner.app/Frameworks`, `<app>.app/Contents/Frameworks`) has
+  `ffo_probe.framework`;
+- iOS and macOS with Swift Package Manager: the generated
   `FlutterGeneratedPluginSwiftPackage/Package.swift` lists `ffo_probe`;
-- iOS: the `Runner` binary mentions `FfoProbePlugin`.
+- iOS and macOS: the app binary (`Runner.app/Runner`,
+  `<app>.app/Contents/MacOS/<app>`) mentions `FfoProbePlugin` (the whole file
+  is searched: with CocoaPods the name is in the binary's imports);
+- macOS: the app bundle has the plugin's string
+  `ffo_probe_native_marker_macos` (in `ffo_probe.framework` with CocoaPods, in
+  the app binary with Swift Package Manager, which links the plugin
+  statically);
+- Linux: the bundle (`build/linux/<arch>/release/bundle`) has
+  `lib/libffo_probe_plugin.so` and the plugin's string
+  `ffo_probe_native_marker_linux`, and its binary needs
+  `libffo_probe_plugin.so` and mentions `FfoProbePlugin`.
 
 `melos6` runs on Android only and switches flavors in one copy, the way a
 developer does: first the other flavor, then the requested one, each with the
@@ -132,13 +156,16 @@ the app's file must list `ffo_probe` in `dev` and must not in `prod`.
 Checks that do not depend on the flavor confirm the setup:
 
 - the flavor was applied: the APK is `app-<flavor>-release.apk` with the
-  flavor's application id; the iOS build used the `Release-<flavor>`
-  configuration and has the flavor's bundle id;
-- the iOS dependency manager is the requested one: with Swift Package Manager
-  the generated plugins package depends on `FlutterFramework`, and neither
-  `Podfile.lock` nor `Runner.app/Frameworks` has `ffo_probe`; with CocoaPods
-  the package depends on neither `FlutterFramework` nor `ffo_probe`. Without
-  plugins (`prod`) Flutter does not run `pod install` at all.
+  flavor's application id; the iOS and macOS builds used the
+  `Release-<flavor>` configuration and have the flavor's bundle id (Linux has
+  no flavor to check);
+- the iOS or macOS dependency manager is the requested one: with Swift Package
+  Manager the generated plugins package depends on `FlutterFramework`, and
+  neither `Podfile.lock` nor the app's `Frameworks` has `ffo_probe`; with
+  CocoaPods the package depends on neither `FlutterFramework` nor `ffo_probe`.
+  Without plugins (`prod`) Flutter does not run `pod install` at all. When
+  `.flutter-plugins-dependencies` exists, its `swift_package_manager_enabled`
+  for the platform is the requested value.
 
 Options:
 
@@ -157,8 +184,10 @@ Requirements: `flutter` and `dart` on `PATH`, `git`, `tar`, `unzip`,
 `strings`. The CLI runs from the repository, which needs `dart pub get`; the
 script runs it when `.dart_tool/package_config.json` is missing. Android: an
 Android SDK (`$ANDROID_HOME`, `$ANDROID_SDK_ROOT`, `~/Library/Android/sdk` or
-`~/Android/Sdk`) with build-tools that have `dexdump` and `aapt2`. iOS: macOS
-with Xcode and CocoaPods.
+`~/Android/Sdk`) with build-tools that have `dexdump` and `aapt2`. iOS and
+macOS: macOS with Xcode and CocoaPods. Linux: a Linux machine with what
+Flutter's Linux desktop builds need (`clang`, `cmake`, `ninja`, `pkg-config`,
+the GTK 3 headers).
 
 ## Oldest supported Flutter
 
@@ -186,9 +215,11 @@ for this.
 
 `.github/workflows/e2e.yml` runs on every push to `main` and every pull
 request, on Flutter 3.44.8: `verify.sh <fixture> android dev` and `prod` for
-all five fixtures on Linux, `ios-cocoapods` and `ios-spm` for the three
-without melos on macOS, and the smoke test on Flutter 3.22.3. `verify.sh` runs on macOS and
-Linux alike.
+all five fixtures on Linux; for the three without melos, one macOS job per
+fixture and dependency manager (CocoaPods, Swift Package Manager) that builds
+iOS and then macOS, `dev` and `prod` each, and one Linux job per fixture for
+Linux desktop; and the smoke test on Flutter 3.22.3. `verify.sh` runs on macOS
+and Linux alike. Windows desktop is not built.
 
 ## Fixture notes
 
@@ -200,9 +231,23 @@ Linux alike.
   target to 15.0 too: Xcode 27 rejects anything lower, while Flutter's
   templates and the `Flutter` pod still say 13.0. The `Podfile` also maps the
   flavor configurations to `:debug` and `:release`.
+- The same on macOS with 12.0, the lowest Xcode 27 accepts (Flutter's
+  templates say 10.15): in the project, in the committed `macos/Podfile`
+  (with the same flavor mapping) and, through its `post_install`, for every
+  pod. `macos/Flutter/Flutter-*.xcconfig` include the pods' xcconfig, as the
+  iOS ones do: Flutter adds that include only when it sets up CocoaPods
+  itself, and a Swift Package Manager build still runs `pod install` for the
+  committed `Podfile`.
 - The apps were created with `flutter create --platforms=android,ios --org
-  io.github.mavoryl`, then `ruby e2e/tool/add_ios_flavors.rb
-  <app>/ios/Runner.xcodeproj`.
-- `melos6/app` is a copy of `path_modules/app` without `ios/`, renamed to
-  `melos6_app`; `melos6_local/app` is a copy of it, renamed to
+  io.github.mavoryl`, then `ruby e2e/tool/add_xcode_flavors.rb
+  <app>/ios/Runner.xcodeproj`; `macos/` and `linux/` came later from
+  `flutter create --platforms=macos,linux` (the same Flutter, the same org),
+  followed by `ruby e2e/tool/add_xcode_flavors.rb <app>/macos/Runner.xcodeproj`.
+- `ffo_probe`'s macOS and Linux code answers one more method channel call,
+  `nativeMarker`, which the Dart API never makes: it keeps the marker strings
+  the checks look for reachable. The Swift marker is longer than 15 bytes,
+  since Swift keeps shorter literals inline in the machine code. The plugin
+  template's Linux unit tests are left out, like the Android ones.
+- `melos6/app` is a copy of `path_modules/app` with only `android/`, renamed
+  to `melos6_app`; `melos6_local/app` is a copy of it, renamed to
   `melos6_local_app`.

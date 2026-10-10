@@ -227,10 +227,10 @@ Analyze every dependent, not only the package that declares the override.
 ## How it is tested
 
 Besides unit tests, CI builds real apps through the CLI: a single package, a pub workspace,
-`path:` modules without a workspace (on Android and on iOS with both CocoaPods and Swift Package
-Manager) and a melos 6 project (on Android), in a flavor with the plugin and one with the stub — and
-checks that the plugin's native code is present in one build and absent from the other. See
-[`e2e/`](e2e/).
+`path:` modules without a workspace (on Android, on iOS and macOS with both CocoaPods and Swift
+Package Manager, and on Linux desktop) and a melos 6 project (on Android), in a flavor with the
+plugin and one with the stub — and checks that the plugin's native code is present in one build and
+absent from the other. Windows desktop is not built. See [`e2e/`](e2e/).
 
 ## License
 

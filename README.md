@@ -51,7 +51,10 @@ root, the melos root, or the app itself (a single package, or an app with module
 ```
 
 - The value is a normal dependency spec: `path:`, `git:`, a hosted version string, `sdk:`, or empty
-  (any version from pub.dev).
+  (any version from pub.dev). Before writing anything, the tool checks the shape of every spec in
+  every flavor: a map names exactly one source (`path`, `git`, `hosted` or `sdk`) with string
+  values, and `version` only beside `git`, `hosted` or `sdk`; a version from pub.dev alone is a
+  plain string. What the strings say is left to pub.
 - Relative paths are relative to `flavor_overrides.yaml`; the tool rebases them for every file it
   writes.
 - A package without an entry for a flavor keeps the real package in that flavor. A typo in a

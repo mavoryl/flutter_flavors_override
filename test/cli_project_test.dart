@@ -189,6 +189,29 @@ ffo_probe:
       expect(read('app/pubspec_overrides.yaml'), isNull);
     });
 
+    test(
+        'a spec of the wrong shape in another flavor: an error, nothing written',
+        () async {
+      singlePackage();
+      final config = project.config('app', '''
+ffo_probe:
+  prod:
+    path: ../stubs/ffo_probe
+  qa:
+    path: 42
+''');
+
+      final result = await cli(['--flavor', 'prod'], dir: 'app');
+
+      expect(result.code, 1);
+      expect(
+        result.err,
+        'flutter_flavor_overrides: error: $config: `ffo_probe.qa.path` must '
+        'be a string.\n',
+      );
+      expect(read('app/pubspec_overrides.yaml'), isNull);
+    });
+
     test('without a pubspec.yaml next to it: an error', () async {
       project.pubspec('app', 'name: app\ndependencies:\n  ffo_probe: 1.0.0\n');
       final config = probeConfig('.', 'stubs/ffo_probe');

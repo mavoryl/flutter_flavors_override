@@ -11,7 +11,8 @@
 - Generates `pubspec_overrides.yaml`: one at a pub workspace root, or one per local package that
   resolves on its own (`path:` modules, `path:` overrides and melos 6 packages without a
   workspace).
-- Checks before writing anything: a `path:` override must point to a package of that name; pub
+- Checks before writing anything: the shape of every dependency spec in every flavor (one
+  source, string values); a `path:` override must point to a package of that name; pub
   workspace members cannot be overridden (pub refuses), with a hint to depend on the package
   through `path:` instead; another `flavor_overrides.yaml` or a `flavor_overrides` section in a
   pubspec of the project, inside its root directory, is an error from any start directory.

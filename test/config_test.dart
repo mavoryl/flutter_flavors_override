@@ -204,6 +204,94 @@ a_plugin:
   4: 1.0.0
 ''', ['`a_plugin.4`']);
     });
+
+    group('the shape of every dependency spec', () {
+      test('accepts every shape pub takes', () {
+        final config = load('''
+a:
+  version: ^1.0.0
+  any:
+  path: {path: stubs/a}
+  git: {git: https://example.com/a.git}
+  git_map:
+    git:
+      url: https://example.com/a.git
+      ref: v1.0.0
+      path: packages/a
+      tag_pattern: v{{version}}
+    version: ^1.0.0
+  hosted: {hosted: https://pub.example.com, version: ^1.0.0}
+  hosted_map: {hosted: {name: a, url: https://pub.example.com}}
+  sdk: {sdk: flutter}
+  sdk_version: {sdk: flutter, version: any}
+''');
+
+        expect(config.flavors, hasLength(9));
+        expect(config.forFlavor('git_map'), {
+          'a': {
+            'git': {
+              'url': 'https://example.com/a.git',
+              'ref': 'v1.0.0',
+              'path': 'packages/a',
+              'tag_pattern': 'v{{version}}',
+            },
+            'version': '^1.0.0',
+          },
+        });
+      });
+
+      /// A config whose only spec is [spec], under `a.prod`.
+      void expectSpecError(String spec, List<String> details) =>
+          expectError('a:\n  prod: $spec\n', details);
+
+      test('a source value of the wrong type', () {
+        expectSpecError('{path: 42}', ['`a.prod.path`', 'string']);
+        expectSpecError('{sdk: [flutter]}', ['`a.prod.sdk`', 'string']);
+        expectSpecError('{hosted: 3}', ['`a.prod.hosted`']);
+        expectSpecError('{git: true}', ['`a.prod.git`']);
+      });
+
+      test('a git map', () {
+        expectSpecError('{git: {url: false}}', ['`a.prod.git.url`', 'string']);
+        expectSpecError('{git: {ref: main}}', ['`a.prod.git.url`']);
+        expectSpecError('{git: {url: u, ref: 3}}', ['`a.prod.git.ref`']);
+        expectSpecError('{git: {url: u, branch: b}}', ['`a.prod.git.branch`']);
+      });
+
+      test('a hosted map', () {
+        expectSpecError('{hosted: {name: 1}}', ['`a.prod.hosted.name`']);
+        expectSpecError('{hosted: {url: u, x: y}}', ['`a.prod.hosted.x`']);
+      });
+
+      test('not exactly one source', () {
+        expectSpecError('{path: a, git: b}', ['`a.prod`', 'one source']);
+        expectSpecError('{}', ['`a.prod`', 'one source']);
+        expectSpecError('{version: ^1.0.0}', ['`a.prod`', 'one source']);
+      });
+
+      test('an unknown key', () {
+        expectSpecError('{unknown: x}', ['`a.prod.unknown`']);
+        expectSpecError('{path: a, unknown: x}', ['`a.prod.unknown`']);
+      });
+
+      test('a version beside path:, or not a string', () {
+        expectSpecError('{path: a, version: 1.0.0}', ['`a.prod.version`']);
+        expectSpecError('{sdk: flutter, version: 3}', ['`a.prod.version`']);
+      });
+
+      test('an empty version string', () {
+        expectSpecError("''", ['`a.prod`']);
+      });
+
+      test('a key that is not a string, at any level, in any flavor', () {
+        expectError('''
+a:
+  prod: 1.0.0
+  qa: {42: hi}
+''', ['`a.qa.42`', 'string']);
+        expectSpecError('{git: {url: u, 1: x}}', ['`a.prod.git.1`', 'string']);
+      });
+    });
   });
 
   group('find', () {

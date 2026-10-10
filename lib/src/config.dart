@@ -98,11 +98,7 @@ class OverridesConfig {
         if (flavor is! String || flavor.isEmpty) {
           fail('`$place`: a flavor must be a non-empty string.');
         }
-        final spec = specNode.value;
-        if (!(specNode is YamlMap || spec is String || spec == null)) {
-          fail('`$place` must be a dependency spec: a map such as '
-              '`path: stubs/$name`, a version string, or empty.');
-        }
+        _checkSpec(specNode, place, name, fail);
         flavors[flavor] = toPlain(specNode);
       }
       packages[name] = flavors;
@@ -122,3 +118,109 @@ class OverridesConfig {
 
 /// [node] as written in the file.
 String _source(YamlNode node) => node.span.text;
+
+/// The sources of a dependency spec map.
+const _sources = {'path', 'git', 'hosted', 'sdk'};
+
+/// The keys of a `git:` map and of a `hosted:` map.
+const _gitKeys = {'url', 'ref', 'path', 'tag_pattern'};
+const _hostedKeys = {'name', 'url'};
+
+/// Checks the shape of the dependency spec [node] of package [name] at
+/// [place] (such as `some_plugin.prod`), on the YAML nodes, calling [fail]
+/// with the problem. Allowed: empty (any version from pub.dev); a non-empty
+/// string (a version constraint); a map with exactly one source among
+/// `path` (a string), `git` (a string, or a map with a string `url` and
+/// optional string `ref`, `path`, `tag_pattern`), `hosted` (a string, or a
+/// map with optional string `name`, `url`) and `sdk` (a string), plus an
+/// optional string `version` beside `git`, `hosted` or `sdk`. Every key, at
+/// every level, is a string. What the strings say (version syntax, URLs,
+/// paths) is pub's to check.
+void _checkSpec(
+  YamlNode node,
+  String place,
+  String name,
+  Never Function(String problem) fail,
+) {
+  _checkKeys(node, place, fail);
+  if (node is YamlScalar) {
+    final value = node.value;
+    if (value == null || (value is String && value.isNotEmpty)) return;
+  }
+  if (node is! YamlMap) {
+    fail('`$place` must be a dependency spec: a map such as '
+        '`path: stubs/$name`, a version string, or empty.');
+  }
+
+  final keys = [for (final key in node.keys) key as String];
+  for (final key in keys) {
+    if (!_sources.contains(key) && key != 'version') {
+      fail('`$place.$key` is not a key of a dependency spec: one of '
+          '${_sources.join(', ')}, and `version` beside git, hosted or sdk.');
+    }
+  }
+  final sources = keys.where(_sources.contains).toList();
+  if (sources.length != 1) {
+    fail('`$place` must name exactly one source, one of '
+        '${_sources.join(', ')}${sources.isEmpty ? '' : ', not '
+            '${sources.join(' and ')}'}; a version from pub.dev is a plain '
+        'string.');
+  }
+  final source = sources.single;
+
+  void string(YamlNode value, String at) {
+    if (value.value is! String) fail('`$at` must be a string.');
+  }
+
+  /// A string, or a map of string values under the keys in [allowed].
+  void stringOrMap(YamlNode value, String at, Set<String> allowed) {
+    if (value is YamlScalar && value.value is String) return;
+    if (value is! YamlMap) fail('`$at` must be a string or a map.');
+    for (final MapEntry(:key, value: item) in value.nodes.entries) {
+      final itemKey = (key as YamlNode).value as String;
+      if (!allowed.contains(itemKey)) {
+        fail('`$at.$itemKey` is not a key of `$source`: one of '
+            '${allowed.join(', ')}.');
+      }
+      string(item, '$at.$itemKey');
+    }
+  }
+
+  final version = node.nodes['version'];
+  if (version != null) {
+    if (source == 'path') {
+      fail('`$place.version`: a path dependency takes no version.');
+    }
+    string(version, '$place.version');
+  }
+  final value = node.nodes[source]!;
+  final at = '$place.$source';
+  switch (source) {
+    case 'path' || 'sdk':
+      string(value, at);
+    case 'git':
+      stringOrMap(value, at, _gitKeys);
+      if (value is YamlMap && !value.containsKey('url')) {
+        fail('`$at.url` is missing: a git map needs the url of the '
+            'repository.');
+      }
+    case 'hosted':
+      stringOrMap(value, at, _hostedKeys);
+  }
+}
+
+/// Every map key under [node] (at [place]) is a string, at every level.
+void _checkKeys(YamlNode node, String place, Never Function(String) fail) {
+  if (node is YamlMap) {
+    for (final MapEntry(:key, :value) in node.nodes.entries) {
+      final keyNode = key as YamlNode;
+      final at = '$place.${_source(keyNode)}';
+      if (keyNode.value is! String) fail('`$at`: a key must be a string.');
+      _checkKeys(value, at, fail);
+    }
+  } else if (node is YamlList) {
+    for (final (i, item) in node.nodes.indexed) {
+      _checkKeys(item, '$place[$i]', fail);
+    }
+  }
+}

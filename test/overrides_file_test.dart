@@ -160,6 +160,149 @@ void main() {
     });
   });
 
+  group('a melos 6 entry for a desired package is taken over', () {
+    // melos bootstrap linked ffo_probe, a melos package, by its path.
+    const linked =
+        '# melos_managed_dependency_overrides: feature,ffo_probe,core\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n'
+        '  ffo_probe:\n'
+        '    path: ../packages/ffo_probe\n';
+
+    const takenOver = '# melos_managed_dependency_overrides: feature,core\n'
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n';
+
+    const onlyProbe = '# melos_managed_dependency_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  ffo_probe:\n'
+        '    path: ../packages/ffo_probe\n';
+
+    test('ours replaces it; melos keeps the other names, in its order', () {
+      expect(merge(linked, probe), takenOver);
+    });
+
+    test('a re-run changes nothing', () {
+      expect(merge(takenOver, probe), takenOver);
+    });
+
+    test('removing ours removes it; melos links it again on bootstrap', () {
+      expect(
+        merge(takenOver, {}),
+        '# melos_managed_dependency_overrides: feature,core\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  feature:\n'
+        '    path: ../packages/feature\n',
+      );
+    });
+
+    test('the last name taken drops the melos marker line, as melos does', () {
+      expect(merge(onlyProbe, probe), probeFile);
+      expect(merge(probeFile, {}), isNull);
+    });
+
+    test('every melos marker line goes when its names run out, as in melos',
+        () {
+      expect(
+        merge(
+          '# melos_managed_dependency_overrides: ffo_probe\n'
+          '# melos_managed_dependency_overrides: core\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../packages/ffo_probe\n',
+          probe,
+        ),
+        probeFile,
+      );
+    });
+
+    test('a melos marker name without an entry is taken out as well', () {
+      expect(
+        merge(
+          '# melos_managed_dependency_overrides: core,ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n',
+          probe,
+        ),
+        '# melos_managed_dependency_overrides: core\n'
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+    });
+
+    test('the melos marker is read on any line at column 0, as melos does', () {
+      const below = '# overrides for local development\n'
+          'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../packages/ffo_probe\n'
+          '# melos_managed_dependency_overrides: ffo_probe,core\n'
+          '  core:\n'
+          '    path: ../core\n';
+
+      expect(
+        merge(below, probe),
+        '# overrides for local development\n'
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '# melos_managed_dependency_overrides: core\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+    });
+
+    group('what melos does not read as its marker leaves a conflict:', () {
+      const entry = 'dependency_overrides:\n'
+          '  ffo_probe:\n'
+          '    path: ../packages/ffo_probe\n';
+      const notMelos = {
+        'no marker (a hand-written entry)': entry,
+        'a marker without the name': '# melos_managed_dependency_overrides: '
+            'core\n$entry',
+        'an indented marker': 'dependency_overrides:\n'
+            '  # melos_managed_dependency_overrides: ffo_probe\n'
+            '  ffo_probe:\n'
+            '    path: ../packages/ffo_probe\n',
+        'a space after a comma': '# melos_managed_dependency_overrides: '
+            'core, ffo_probe\n$entry',
+        'no space after the colon': '# melos_managed_dependency_overrides:'
+            'ffo_probe\n$entry',
+      };
+
+      notMelos.forEach((name, file) {
+        test(name, () {
+          expect(
+            () => merge(file, probe),
+            throwsA(
+              isA<FlavorOverridesException>().having(
+                (e) => e.message,
+                'message',
+                allOf(contains(filePath), contains('ffo_probe')),
+              ),
+            ),
+          );
+        });
+      });
+    });
+  });
+
   group("the pubspec's dependency_overrides", () {
     const pubspecOverrides = {
       'other': {'path': '../vendor/other'},
@@ -480,6 +623,32 @@ void main() {
       });
     });
 
+    test('a melos entry taken over: ours end the file without one', () {
+      const linked = '# melos_managed_dependency_overrides: core,ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../packages/ffo_probe';
+      const takenOver = '# melos_managed_dependency_overrides: core\n'
+          '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '    path: ../stubs/ffo_probe';
+
+      expect(merge(linked, probe), takenOver);
+      expect(merge(takenOver, probe), takenOver);
+      expect(
+        merge(takenOver, {}),
+        '# melos_managed_dependency_overrides: core\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core',
+      );
+    });
+
     test('adding ours puts a line break before them', () {
       expect(
         merge('# note', probe),
@@ -527,7 +696,7 @@ void main() {
         );
 
     test('a foreign entry for a desired package', () {
-      const foreign = '# melos_managed_dependency_overrides: ffo_probe\n'
+      const foreign = '# melos_managed_dependency_overrides: core\n'
           'dependency_overrides:\n'
           '  ffo_probe:\n'
           '    path: ../packages/ffo_probe\n';

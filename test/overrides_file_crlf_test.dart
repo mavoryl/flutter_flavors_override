@@ -40,5 +40,30 @@ void main() {
       final prod = merge(melos, desired);
       expect(merge(prod, desired), prod);
     });
+
+    test('a melos entry for a desired package is taken over', () {
+      final linked =
+          crlf('# melos_managed_dependency_overrides: core,ffo_probe\n'
+              'dependency_overrides:\n'
+              '  core:\n'
+              '    path: ../core\n'
+              '  ffo_probe:\n'
+              '    path: ../packages/ffo_probe\n');
+
+      final out = merge(linked, desired);
+
+      expect(
+        out,
+        crlf('# melos_managed_dependency_overrides: core\n'
+            '# flutter_flavor_overrides: ffo_probe\n'
+            'dependency_overrides:\n'
+            '  core:\n'
+            '    path: ../core\n'
+            '  ffo_probe:\n'
+            '    path: ../stubs/ffo_probe\n'),
+      );
+      expect(merge(out, desired), out);
+      expect(merge(out, const {}), melos);
+    });
   });
 }

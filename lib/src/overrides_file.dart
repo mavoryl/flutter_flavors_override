@@ -13,7 +13,10 @@ const markerPrefix = '# flutter_flavor_overrides:';
 ///
 /// Our entries are those listed in the marker comment line. They are replaced
 /// by [desired]; foreign entries, comments and other keys are kept. A foreign
-/// entry for a [desired] package is an error naming [filePath]. With
+/// entry for a [desired] package is an error naming [filePath], unless melos 6
+/// owns it: listed in the melos marker line, it is taken over. Its name
+/// leaves that marker and the entry becomes ours, so removing ours removes it
+/// too, and the next `melos bootstrap` links the package again. With
 /// [desired] entries, [pubspecOverrides] are copied in as ours, but for
 /// packages a foreign entry overrides: pub ignores the pubspec's
 /// `dependency_overrides` once the file has the key (T4).
@@ -47,17 +50,26 @@ String? _mergeLf({
   if (existing != null) _validate(existing, filePath);
   var text = existing ?? '';
   final marker = _Marker.find(text);
+  final melosNames = _melosNames(text);
+  final takenOver = desired.keys.where(melosNames.contains).toSet();
 
-  // 1. Remove our entries, each with its own lines only: yaml_edit would also
-  // drop the comments that follow an entry.
+  // 1. Remove our entries and the melos entries we take over, each with its
+  // own lines only: yaml_edit would also drop the comments that follow an
+  // entry.
   var emptiedSection = false;
-  for (final name in marker?.names ?? const <String>{}) {
+  for (final name in {...?marker?.names, ...takenOver}) {
     final section = _section(text);
     if (section is! YamlMap || !section.containsKey(name)) continue;
     text = section.style == CollectionStyle.FLOW
         ? (YamlEditor(text)..remove(['dependency_overrides', name])).toString()
         : _cutEntry(text, section, name).text;
     emptiedSection = true;
+  }
+  if (takenOver.isNotEmpty) {
+    text = _setMelosNames(text, [
+      for (final name in melosNames)
+        if (!takenOver.contains(name)) name,
+    ]);
   }
 
   // 2. What is left in the YAML is foreign.
@@ -179,6 +191,29 @@ class _Marker {
     return null;
   }
 }
+
+/// The marker line of melos 6, which lists the entries `melos bootstrap`
+/// owns. Read and rewritten like melos 6.3.3 does
+/// (`lib/src/commands/bootstrap.dart`, `mergeMelosPubspecOverrides`): any line
+/// at column 0, the first one counts.
+final _melosMarker = RegExp(
+  '^# melos_managed_dependency_overrides: (.*)\n',
+  multiLine: true,
+);
+
+/// The package names the melos marker of [text] lists, in order. Like melos,
+/// split at commas, not trimmed: ` b` in `a, b` is not `b`.
+Set<String> _melosNames(String text) =>
+    _melosMarker.firstMatch(text)?.group(1)!.split(',').toSet() ?? {};
+
+/// [text] with the melos marker listing [names], like melos rewrites it:
+/// without names, every marker line goes.
+String _setMelosNames(String text, List<String> names) => names.isEmpty
+    ? text.replaceAll(_melosMarker, '')
+    : text.replaceFirstMapped(
+        _melosMarker,
+        (_) => '# melos_managed_dependency_overrides: ${names.join(',')}\n',
+      );
 
 /// Spans of every scalar in [node], keys included.
 Iterable<({int start, int end})> _scalarSpans(YamlNode node) sync* {

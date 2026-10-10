@@ -153,6 +153,29 @@ before the tool, not after it.
 Locally, switching back is the same command with another flavor (or `--clean`): the tool removes
 what it wrote.
 
+### With melos 7 or later
+
+melos runs a `pre` hook before `melos bootstrap` resolves the workspace, so the overrides are in
+place every time:
+
+```yaml
+# pubspec.yaml at the workspace root
+melos:
+  command:
+    bootstrap:
+      hooks:
+        pre: dart pub global run flutter_flavor_overrides --flavor "${FLAVOR:-dev}"
+```
+
+```console
+$ FLAVOR=prod melos bootstrap
+```
+
+Without `FLAVOR` the hook uses `dev`; a flavor with no overrides just removes the tool's entries.
+Use `${FLAVOR:?set FLAVOR}` instead to make `bootstrap` fail without a flavor. A failing hook
+stops `bootstrap`. The hook is a shell command (`sh` on macOS and Linux); on Windows, write it for
+`cmd` or call a script. It runs only with `melos bootstrap`, not with a plain `flutter pub get`.
+
 ### Where the files go
 
 The directory of `flavor_overrides.yaml` is the project root, and the project is what the root

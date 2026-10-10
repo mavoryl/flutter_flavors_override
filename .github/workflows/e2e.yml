@@ -60,15 +60,18 @@ jobs:
         if: success() || failure()
         run: e2e/tool/verify.sh ${{ matrix.structure }} android prod
 
-  ios:
-    name: ${{ matrix.mechanism }} / ${{ matrix.structure }}
+  # iOS and macOS share a runner: the same Xcode, CocoaPods and dependency
+  # manager, one setup.
+  apple:
+    name: ios, macos / ${{ matrix.manager }} / ${{ matrix.structure }}
     runs-on: macos-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         structure: [single, workspace, path_modules]
-        mechanism: [ios-cocoapods, ios-spm]
+        # CocoaPods or Swift Package Manager, for both platforms.
+        manager: [cocoapods, spm]
     steps:
       - uses: actions/checkout@v4
 
@@ -81,12 +84,56 @@ jobs:
       - name: pub get
         run: dart pub get
 
+      - name: ios dev
+        run: e2e/tool/verify.sh ${{ matrix.structure }} ios-${{ matrix.manager }} dev
+
+      - name: ios prod
+        if: success() || failure()
+        run: e2e/tool/verify.sh ${{ matrix.structure }} ios-${{ matrix.manager }} prod
+
+      - name: macos dev
+        if: success() || failure()
+        run: e2e/tool/verify.sh ${{ matrix.structure }} macos-${{ matrix.manager }} dev
+
+      - name: macos prod
+        if: success() || failure()
+        run: e2e/tool/verify.sh ${{ matrix.structure }} macos-${{ matrix.manager }} prod
+
+  linux:
+    name: linux / ${{ matrix.structure }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        structure: [single, workspace, path_modules]
+    steps:
+      - uses: actions/checkout@v4
+
+      # What Flutter's Linux desktop build needs. Linux desktop is enabled by
+      # default on stable, no `flutter config` needed.
+      - name: apt-get install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.8
+          channel: stable
+          cache: true
+
+      - name: pub get
+        run: dart pub get
+
+      # No --flavor on Linux: Flutter does not support flavors there, the
+      # flavor only picks the overrides.
       - name: dev
-        run: e2e/tool/verify.sh ${{ matrix.structure }} ${{ matrix.mechanism }} dev
+        run: e2e/tool/verify.sh ${{ matrix.structure }} linux dev
 
       - name: prod
         if: success() || failure()
-        run: e2e/tool/verify.sh ${{ matrix.structure }} ${{ matrix.mechanism }} prod
+        run: e2e/tool/verify.sh ${{ matrix.structure }} linux prod
 
   min-flutter-smoke:
     name: smoke on the minimum Flutter (3.22.3)

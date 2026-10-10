@@ -55,9 +55,12 @@ String? _mergeLf({
 
   // 1. Remove our entries and the melos entries we take over, each with its
   // own lines only: yaml_edit would also drop the comments that follow an
-  // entry.
+  // entry. Our marker in those lines goes with them and is written anew; the
+  // melos marker moves out first.
+  final cut = {...?marker?.names, ...takenOver};
+  text = _melosMarkerOutside(text, cut);
   var emptiedSection = false;
-  for (final name in {...?marker?.names, ...takenOver}) {
+  for (final name in cut) {
     final section = _section(text);
     if (section is! YamlMap || !section.containsKey(name)) continue;
     text = section.style == CollectionStyle.FLOW
@@ -205,6 +208,21 @@ final _melosMarker = RegExp(
 /// split at commas, not trimmed: ` b` in `a, b` is not `b`.
 Set<String> _melosNames(String text) =>
     _melosMarker.firstMatch(text)?.group(1)!.split(',').toSet() ?? {};
+
+/// [text] with the melos marker moved to the first line, where melos writes
+/// it, when it lies in the lines of an entry of [names], which are to be cut.
+String _melosMarkerOutside(String text, Set<String> names) {
+  final marker = _melosMarker.firstMatch(text);
+  final section = _section(text);
+  if (marker == null || section is! YamlMap) return text;
+  final inside = names.any((name) {
+    if (!section.containsKey(name)) return false;
+    final (:start, :end) = _entryLines(text, section, name);
+    return start <= marker.start && marker.start < end;
+  });
+  if (!inside) return text;
+  return '${marker[0]}${text.replaceRange(marker.start, marker.end, '')}';
+}
 
 /// [text] with the melos marker listing [names], like melos rewrites it:
 /// without names, every marker line goes.
@@ -354,10 +372,16 @@ String _withoutEmptyRoot(String text) {
   return text.replaceRange(root.span.start.offset, root.span.end.offset, '');
 }
 
-/// Cuts the entry [key] of the block map [map] out of [text]: the lines from
-/// its key through the line where its value's content ends. Comments after
-/// that line stay.
+/// Cuts the entry [key] of the block map [map] out of [text]: its
+/// [_entryLines]. Comments after them stay.
 ({String text, int offset}) _cutEntry(String text, YamlMap map, String key) {
+  final (:start, :end) = _entryLines(text, map, key);
+  return (text: text.replaceRange(start, end, ''), offset: start);
+}
+
+/// Offsets of the lines of the entry [key] of [map] in [text]: from its key
+/// through the line where its value's content ends, line break included.
+({int start, int end}) _entryLines(String text, YamlMap map, String key) {
   final keyNode = map.nodes.keys.cast<YamlNode>().firstWhere(
         (node) => node.value == key,
       );
@@ -365,8 +389,7 @@ String _withoutEmptyRoot(String text) {
   final start = keyOffset == 0 ? 0 : text.lastIndexOf('\n', keyOffset - 1) + 1;
   final contentEnd = max(keyNode.span.end.offset, _contentEnd(map.nodes[key]!));
   final lineEnd = text.indexOf('\n', max(contentEnd - 1, start));
-  final end = lineEnd == -1 ? text.length : lineEnd + 1;
-  return (text: text.replaceRange(start, end, ''), offset: start);
+  return (start: start, end: lineEnd == -1 ? text.length : lineEnd + 1);
 }
 
 /// Where the content of [node] ends. The span of a block collection runs on

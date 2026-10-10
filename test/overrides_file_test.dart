@@ -303,6 +303,88 @@ void main() {
     });
   });
 
+  group('a marker inside the lines of an entry that is cut', () {
+    test('of melos, in an entry taken over: moves to the first line', () {
+      expect(
+        merge(
+          'dependency_overrides:\n'
+          '  a:\n'
+          '# melos_managed_dependency_overrides: a,b\n'
+          '    path: ../a\n'
+          '  b:\n'
+          '    path: ../b\n',
+          {
+            'a': {'path': '../stub/a'},
+          },
+        ),
+        '# melos_managed_dependency_overrides: b\n'
+        '# flutter_flavor_overrides: a\n'
+        'dependency_overrides:\n'
+        '  a:\n'
+        '    path: ../stub/a\n'
+        '  b:\n'
+        '    path: ../b\n',
+      );
+    });
+
+    test('of melos, in an entry of ours: moves to the first line', () {
+      const file = '# flutter_flavor_overrides: ffo_probe\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '# melos_managed_dependency_overrides: core\n'
+          '    path: ../stubs/ffo_probe\n';
+      const melosFile = '# melos_managed_dependency_overrides: core\n'
+          'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n';
+
+      expect(merge(file, {}), melosFile);
+      expect(
+        merge(file, probe),
+        '# melos_managed_dependency_overrides: core\n'
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+    });
+
+    test('of ours: goes with the entry, a new one is written on top', () {
+      const file = 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n'
+          '  ffo_probe:\n'
+          '# flutter_flavor_overrides: ffo_probe\n'
+          '    path: ../stubs/ffo_probe\n';
+      const foreign = 'dependency_overrides:\n'
+          '  core:\n'
+          '    path: ../core\n';
+
+      expect(merge(file, {}), foreign);
+      expect(
+        merge(file, probe),
+        '# flutter_flavor_overrides: ffo_probe\n'
+        'dependency_overrides:\n'
+        '  core:\n'
+        '    path: ../core\n'
+        '  ffo_probe:\n'
+        '    path: ../stubs/ffo_probe\n',
+      );
+      expect(
+        merge(file, {'a_plugin': '1.0.0'}),
+        '# flutter_flavor_overrides: a_plugin\n'
+        'dependency_overrides:\n'
+        '  a_plugin: 1.0.0\n'
+        '  core:\n'
+        '    path: ../core\n',
+      );
+    });
+  });
+
   group("the pubspec's dependency_overrides", () {
     const pubspecOverrides = {
       'other': {'path': '../vendor/other'},

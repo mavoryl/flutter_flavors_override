@@ -6,6 +6,7 @@ package name lives next to the app:
 ```text
 my_app/
   pubspec.yaml
+  flavor_overrides.yaml
 stubs/
   some_plugin/        # name: some_plugin, same Dart API, no `flutter: plugin:` section
     pubspec.yaml
@@ -22,11 +23,15 @@ dependencies:
   flutter:
     sdk: flutter
   some_plugin: 1.2.0
+```
 
-flavor_overrides:
+`my_app/flavor_overrides.yaml`, next to the app's pubspec (package, then flavor, then any
+dependency spec; paths relative to this file):
+
+```yaml
+some_plugin:
   prod:
-    some_plugin:
-      path: ../stubs/some_plugin
+    path: ../stubs/some_plugin
 ```
 
 `stubs/some_plugin/pubspec.yaml`:

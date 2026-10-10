@@ -4,19 +4,16 @@ Swap a Flutter plugin for a no-op stub in specific flavors — so the plugin's n
 (Android classes, iOS pods or Swift packages) is not in those builds at all.
 
 Flutter has no per-flavor dependencies: every plugin in `pubspec.yaml` ends up in every flavor.
-This CLI reads per-flavor declarations from your pubspec files and generates
-`pubspec_overrides.yaml`, which pub applies on top of `pubspec.yaml`. Your committed
-`pubspec.yaml` never changes.
+This CLI reads the per-flavor overrides of a project from one `flavor_overrides.yaml` next to its
+root `pubspec.yaml` and generates `pubspec_overrides.yaml`, which pub applies on top of
+`pubspec.yaml`, for every package of the project that uses an overridden package. Your committed
+`pubspec.yaml` files never change.
 
 ```yaml
-# pubspec.yaml of the package that uses the plugin
-dependencies:
-  some_plugin: 1.2.0
-
-flavor_overrides:        # ignored by pub, read by this tool
+# flavor_overrides.yaml, next to the root pubspec.yaml
+some_plugin:
   prod:
-    some_plugin:
-      path: ../stubs/some_plugin_no_op
+    path: stubs/some_plugin_no_op
 ```
 
 ```console
@@ -44,39 +41,41 @@ Requires Dart 3.4 or newer to run. Your project needs `pubspec_overrides.yaml` s
 
 ## Declare overrides
 
-Add a top-level `flavor_overrides` section to the pubspec of the package that depends on the
-plugin:
+Put one `flavor_overrides.yaml` next to the root `pubspec.yaml` of the project: the pub workspace
+root, the melos root, or the app itself (a single package, or an app with modules through
+`path:`). Under each package to swap, the flavors that swap it:
 
 ```yaml
-flavor_overrides:
-  <flavor>:
-    <package>: <any dependency spec pub accepts>
+<package>:
+  <flavor>: <any dependency spec pub accepts>
 ```
 
-- The value is a normal dependency spec: `path:`, `git:`, a hosted version, `sdk:`.
-- Relative paths are relative to the pubspec they are written in; the tool rebases them for the
-  file it writes.
-- Without a matching section the real package is used. A typo in a flavor name therefore means
-  "no override", not an error.
-- Declare the override in **every** local package that depends on the plugin, not only in one of
-  them: without a workspace each package resolves on its own and only sees declarations it can
-  reach. Identical declarations in several pubspecs are merged; different specs for one package
-  in one flavor are an error that names every pubspec involved.
-- A declaration takes precedence over the same package in that pubspec's own
-  `dependency_overrides`. In a pub workspace, a member must not override the same package itself:
-  pub refuses a package overridden in two places, so the tool stops with an error instead.
+- The value is a normal dependency spec: `path:`, `git:`, a hosted version string, `sdk:`, or empty
+  (any version from pub.dev).
+- Relative paths are relative to `flavor_overrides.yaml`; the tool rebases them for every file it
+  writes.
+- A package without an entry for a flavor keeps the real package in that flavor. A typo in a
+  flavor name therefore means "no override", not an error (the tool notes it, see
+  [Options](#options)).
+- Declare an override once: the tool applies it to every package of the project that uses the
+  package (see [Where the files go](#where-the-files-go)), so no module can be forgotten.
+- An override takes precedence over the same package in a pubspec's own `dependency_overrides`.
+  In a pub workspace, a member must not override the same package itself: pub refuses a package
+  overridden in two places, so the tool stops with an error instead.
+- One file per project: the tool finds it from the directory it runs in, going up, and its
+  directory is the project root. A `flavor_overrides.yaml` in another package of the project, or a
+  `flavor_overrides` section left in a pubspec, is an error.
 
-Keys under `flavor_overrides` are just labels matched against `--flavor`; they don't have to
-match your Flutter flavors. To vary overrides by build mode too, use composite keys such as
-`prodRelease` and `prodDebug`, and run the tool with the one you build:
+Flavor keys are just labels matched against `--flavor`; they don't have to match your Flutter
+flavors. To vary overrides by build mode too, use composite keys such as `prodRelease` and
+`prodDebug`, and run the tool with the one you build:
 
 ```yaml
-flavor_overrides:
-  prodRelease:
-    some_plugin: {path: ../stubs/some_plugin}
-    network_inspector: {path: ../stubs/network_inspector}
-  prodDebug:
-    some_plugin: {path: ../stubs/some_plugin}
+some_plugin:
+  prodRelease: {path: stubs/some_plugin}
+  prodDebug: {path: stubs/some_plugin}
+network_inspector:
+  prodRelease: {path: stubs/network_inspector}
 ```
 
 ```console
@@ -100,10 +99,11 @@ The tool does not generate stubs. A stub is a small package that:
 
 The stub is never a participant of its own: not a pub workspace member, not under melos
 `packages:` globs (list it under `ignore:` if a glob would catch it), not a `path:` dependency of
-anything. Only `flavor_overrides` points to it, so it joins the resolution only in the flavor that
-swaps it — and then it is resolved together with the rest of the project, no separate `pub get`
-needed. Run `pub get` inside the stub only to work on it as a package of its own (its tests,
-`dart analyze` in its directory).
+anything. Only `flavor_overrides.yaml` points to it, so it joins the resolution only in the flavor
+that swaps it — and then it is resolved together with the rest of the project, no separate `pub
+get` needed. Run `pub get` inside the stub only to work on it as a package of its own (its tests,
+`dart analyze` in its directory). Before writing anything, the tool checks that a `path:` points to
+a directory whose `pubspec.yaml` has the package's name.
 
 ## What can be swapped
 
@@ -149,19 +149,37 @@ what it wrote.
 
 ### Where the files go
 
-- **Pub workspace:** one `pubspec_overrides.yaml` at the workspace root, with declarations from
-  the root, every member (glob entries are expanded) and every local `path:` package. Run the tool
-  from the root or from any member.
+The directory of `flavor_overrides.yaml` is the project root, and the project is what the root
+sees: the root package, workspace members (glob entries are expanded), melos packages, and every
+local package reached through `path:` dependencies or `path:` overrides. The tool looks for the
+file from the directory it runs in upward, so run it from the root or from below it, such as a
+workspace member or a melos package. Without a workspace or melos, the root is the app you build
+(`example/` in a plugin repository): modules next to it are part of the project, but a run from
+one of them does not find the file.
+
+- **Pub workspace:** one `pubspec_overrides.yaml` at the workspace root, with every override a
+  package of the workspace uses.
 - **No workspace:** one file in every local package that resolves on its own — the app and each
   module reachable through `path:` dependencies — so modules get the override in their own tests
-  and analysis too. A package gets a file only if it can reach a declaration. Run the tool from
-  the package you build (the app, or `example/` in a plugin repository): only packages reachable
-  from it are visited, so `--clean` from a library does not reach an `example/` that depends on
-  it.
+  and analysis too.
 - **melos 6 without a workspace:** packages listed under `packages:` in `melos.yaml` are local
   packages too, and dependencies on them by name count, so modules that melos links are covered.
-  Run the tool from the melos root or from any melos package. melos's own entries and the tool's
-  live side by side in the same files.
+  melos's own entries and the tool's live side by side in the same files.
+
+A package's file gets the override of a package it uses: one that it, or a local package it
+reaches, depends on (`dependencies`; `dev_dependencies` only of the package that resolves, in a
+workspace of every member), or one its `pubspec.lock` lists, which covers packages that come in
+through other packages from pub.dev or git. A package never gets an override of itself. An
+override that no package of the project uses is left out with a warning: pub would otherwise pull
+the package into the resolution.
+
+The `pubspec.lock` is read when it is there. A module without one (a library that does not commit
+it) that uses a package only through a package from pub.dev or git keeps the real package in its
+own tests until its first `pub get`; run the tool again after it. App builds are not affected when
+the app commits its `pubspec.lock`, as Flutter recommends.
+
+`--clean` works without `flavor_overrides.yaml` too: it then cleans the project found from the
+directory it runs in.
 
 ### Existing `pubspec_overrides.yaml` files
 
@@ -178,28 +196,29 @@ file returns to what it was before; a file left with nothing but what the tool w
 
 | Option | |
 |---|---|
-| `-f, --flavor <name>` | Write the overrides declared under `flavor_overrides.<name>`. |
+| `-f, --flavor <name>` | Write the overrides `flavor_overrides.yaml` gives for flavor `<name>`. |
 | `--clean` | Remove the entries this tool wrote, in every file. |
 | `--dry-run` | Print what would be written or removed; change nothing. |
 | `--list-dependents` | Print the local packages that depend on a package overridden in this flavor; change nothing. |
 | `-C, --directory <dir>` | Run in `<dir>` instead of the current directory. |
 
 Status lines and `--list-dependents` print paths relative to the directory the tool runs in
-(after `-C`); error messages name files by absolute path. If no pubspec
-in the project declares the selected flavor, the tool says so on stderr, suggests close matches
-and lists the flavors it found, and still exits `0`:
+(after `-C`); error messages name files by absolute path. If `flavor_overrides.yaml` names the
+selected flavor under no package, the tool says so on stderr, suggests close matches and lists the
+flavors it found, and still exits `0`:
 
 ```console
 $ flutter_flavor_overrides --flavor prd
 flutter_flavor_overrides: no flavor_overrides for flavor `prd` in this project. Did you mean `prod`? Declared flavors: develop, prod.
 ```
 
-A flavor that deliberately has no overrides can be declared empty (`develop:` with nothing
-under it) to keep the log quiet.
+A flavor that has no overrides, such as `dev`, gets the same note; it only informs.
 
-Exit codes: `0` success, `64` invalid usage, `1` a problem in the project or declarations (the
-message names the file). Problems in the project or the declarations are found before any file
-is written, so they leave the project untouched.
+Exit codes: `0` success, `64` invalid usage, `1` a problem in the project or in
+`flavor_overrides.yaml` (the message names the file). Such problems are found before any file is
+written, so they leave the project untouched. Warnings (`flutter_flavor_overrides: warning: …`)
+do not stop a run: an override no package uses, a `pubspec.lock` that cannot be read, a `path:`
+dependency on a directory that does not exist yet.
 
 ## Check stubs on pull requests
 
@@ -213,7 +232,8 @@ for pkg in $(flutter_flavor_overrides --flavor prod --list-dependents); do
 done
 ```
 
-Analyze every dependent, not only the package that declares the override.
+`--list-dependents` lists every local package that depends on a swapped package directly: their
+code imports it, so analyze each of them, not only the app.
 
 ## Limitations
 

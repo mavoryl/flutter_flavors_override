@@ -40,6 +40,23 @@ jobs:
       - name: unit tests
         run: dart test
 
+  windows:
+    name: unit tests on Windows (Dart 3.12.2)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.12.2
+
+      - name: pub get
+        run: dart pub get
+
+      # Paths: drive letters, backslashes and rebasing between packages.
+      - name: unit tests
+        run: dart test
+
   min-sdk:
     name: CLI on minimum SDK (Dart 3.4.0)
     runs-on: ubuntu-latest

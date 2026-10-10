@@ -2,6 +2,7 @@ import 'package:path/path.dart' as p;
 
 import 'errors.dart';
 import 'local_package.dart' show canonicalDir;
+import 'paths.dart';
 import 'project.dart';
 
 /// One package to override in a pubspec_overrides.yaml.
@@ -89,7 +90,7 @@ bool _deepEquals(Object? a, Object? b) {
 }
 
 /// Rebases `path:` (and a relative filesystem `git:` url / `git: {url:}`) from
-/// [fromDir] to [toDir]; posix separators; normalized; absolute paths
+/// [fromDir] to [toDir]; `/` separators; normalized; absolute paths
 /// untouched; hosted/sdk specs returned as is.
 Object? rebaseSpec(
   Object? spec, {
@@ -97,7 +98,8 @@ Object? rebaseSpec(
   required String toDir,
 }) {
   if (spec is! Map<String, Object?>) return spec;
-  String rebase(String path) => _rebasePath(path, fromDir, toDir);
+  String rebase(String path) =>
+      rebasePath(path, fromDir: fromDir, toDir: toDir);
 
   final path = spec['path'];
   if (path is String && !p.isAbsolute(path)) {
@@ -118,11 +120,6 @@ Object? rebaseSpec(
     }
   }
   return spec;
-}
-
-String _rebasePath(String path, String fromDir, String toDir) {
-  final target = p.normalize(p.join(fromDir, path));
-  return p.posix.joinAll(p.split(p.relative(target, from: toDir)));
 }
 
 /// Like pub: a url with `@` is ssh, a url with a scheme is remote; anything

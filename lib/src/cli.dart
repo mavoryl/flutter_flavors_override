@@ -8,6 +8,7 @@ import 'declarations.dart';
 import 'errors.dart';
 import 'local_package.dart' show canonicalDir, toPlain;
 import 'overrides_file.dart';
+import 'paths.dart';
 import 'project.dart';
 
 const _name = 'flutter_flavor_overrides';
@@ -294,4 +295,4 @@ String? _read(String path) {
 
 /// [path] relative to [from], with `/`; `.` for [from] itself.
 String _relative(String path, {required String from}) =>
-    p.posix.joinAll(p.split(p.relative(path, from: from)));
+    portableRelative(path, from: from);

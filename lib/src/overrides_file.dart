@@ -19,7 +19,26 @@ const markerPrefix = '# flutter_flavor_overrides:';
 /// `dependency_overrides` once the file has the key (T4).
 /// A file without a final line break keeps having none, so that removing our
 /// entries gives back its text byte for byte.
+///
+/// A file saved with CRLF line endings (Windows editors) is merged as LF and
+/// handed back with CRLF.
 String? mergeOverrides({
+  required String? existing,
+  required Map<String, Object?> desired,
+  required Map<String, Object?> pubspecOverrides,
+  required String filePath,
+}) {
+  final crlf = existing != null && existing.contains('\r\n');
+  final merged = _mergeLf(
+    existing: crlf ? existing.replaceAll('\r\n', '\n') : existing,
+    desired: desired,
+    pubspecOverrides: pubspecOverrides,
+    filePath: filePath,
+  );
+  return crlf ? merged?.replaceAll('\n', '\r\n') : merged;
+}
+
+String? _mergeLf({
   required String? existing,
   required Map<String, Object?> desired,
   required Map<String, Object?> pubspecOverrides,

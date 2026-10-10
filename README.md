@@ -160,7 +160,9 @@ Exit codes: `0` success, `64` invalid usage, `1` an error in the project or in
 - A pub workspace member cannot be swapped: pub refuses to override workspace packages, so the
   tool stops with an error. Depend on such a package through `path:` instead of listing it in
   `workspace:`.
-- Do not commit `pubspec.lock` or `Podfile.lock` from a run with overrides.
+- Overrides change the resolution, so `pubspec.lock` and `Podfile.lock` no longer match the
+  committed ones: `pub get --enforce-lockfile` fails after the tool, and lock files from such a
+  run should not be committed.
 - CocoaPods: locally switching to a flavor where no plugin is left can fail with "The sandbox is
   not in sync with the Podfile.lock". Run `pod install` in `ios/` once.
 - A module without its own `pubspec.lock` that gets a package only through a package from pub.dev

@@ -168,6 +168,105 @@ flavor_overrides:
     expect(read('packages/feature/pubspec_overrides.yaml'), isNull);
   });
 
+  group('a declaration of a workspace member', () {
+    /// app and feature declare prod overrides of my_library, a member.
+    setUp(() {
+      project.pubspec('.', '''
+name: root
+workspace:
+  - app
+  - packages/*
+''');
+      project.pubspec('app', '''
+name: app
+resolution: workspace
+dependencies:
+  my_library: 1.0.0
+flavor_overrides:
+  dev: {}
+  prod:
+    my_library:
+      path: ../stubs/my_library
+''');
+      project.pubspec('packages/feature', '''
+name: feature
+resolution: workspace
+flavor_overrides:
+  prod:
+    my_library:
+      path: ../../stubs/my_library
+''');
+      project.pubspec(
+        'packages/my_library',
+        'name: my_library\nversion: 1.0.0\nresolution: workspace\n',
+      );
+    });
+
+    test('fails before any write, naming the pubspecs and the fix', () async {
+      final result = await cli(['--flavor', 'prod']);
+
+      expect(result.code, 1);
+      expect(result.out, isEmpty);
+      expect(result.err, contains('`my_library`'));
+      expect(result.err, contains(project.path('app/pubspec.yaml')));
+      expect(
+          result.err, contains(project.path('packages/feature/pubspec.yaml')));
+      expect(
+        result.err,
+        contains(project.path('packages/my_library/pubspec.yaml')),
+      );
+      expect(result.err, contains('`workspace:`'));
+      expect(result.err, contains('`path:`'));
+      expect(read('pubspec_overrides.yaml'), isNull);
+    });
+
+    test('fails with --dry-run too', () async {
+      final result = await cli(['--flavor', 'prod', '--dry-run']);
+
+      expect(result.code, 1);
+      expect(result.out, isEmpty);
+      expect(result.err, contains('`my_library`'));
+    });
+
+    test('does not stop another flavor', () async {
+      final result = await cli(['--flavor', 'dev']);
+
+      expect(result.err, isEmpty);
+      expect(result.code, 0);
+      expect(result.out, 'up to date\n');
+    });
+
+    test('does not stop --clean', () async {
+      final result = await cli(['--clean']);
+
+      expect(result.code, 0);
+      expect(result.out, 'up to date\n');
+    });
+  });
+
+  test('workspace: a package taken out of it, through path:, is overridden',
+      () async {
+    project.pubspec('.', 'name: root\nworkspace:\n  - app\n');
+    project.pubspec('app', '''
+name: app
+resolution: workspace
+dependencies:
+  my_library:
+    path: ../packages/my_library
+flavor_overrides:
+  prod:
+    my_library:
+      path: ../stubs/my_library
+''');
+    project.pubspec('packages/my_library', 'name: my_library\n');
+
+    final result = await cli(['--flavor', 'prod']);
+
+    expect(result.err, isEmpty);
+    expect(result.code, 0);
+    expect(read('pubspec_overrides.yaml'), contains('path: stubs/my_library'));
+  });
+
   group('paths are printed relative to where the tool runs', () {
     setUp(() {
       // ws/ with members a and b; a declares prod, both use the plugin.

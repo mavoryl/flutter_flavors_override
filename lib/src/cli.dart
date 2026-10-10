@@ -191,6 +191,7 @@ List<_Change> _plan(Project project, String? flavor) {
     final declarations = flavor == null
         ? const <Declaration>[]
         : declarationsFor(project, dir, flavor);
+    _checkNoMemberOverridden(project, declarations, flavor);
     _checkMembers(
       project,
       members,
@@ -227,6 +228,30 @@ List<_Change> _plan(Project project, String? flavor) {
     ),
     text: text,
   );
+}
+
+/// pub refuses to override a workspace member ("Cannot override workspace
+/// packages", T7): no declaration of [flavor] may name one.
+void _checkNoMemberOverridden(
+  Project project,
+  List<Declaration> declarations,
+  String? flavor,
+) {
+  final members = {
+    for (final dir in project.members) project.packages[dir]!.name: dir,
+  };
+  for (final declaration in declarations) {
+    final name = declaration.package;
+    final dir = members[name];
+    if (dir == null) continue;
+    throw FlavorOverridesException(
+      '${declaration.sources.join(', ')}: flavor `$flavor` overrides '
+      '`$name`, a member of the pub workspace '
+      '(${project.packages[dir]!.pubspecPath}); pub does not override '
+      'workspace members. To swap it, take it out of `workspace:` and '
+      'depend on it through `path:`.',
+    );
+  }
 }
 
 /// pub fails when a workspace overrides a package in two files (T5): no member

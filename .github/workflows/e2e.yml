@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        structure: [single, workspace, path_modules, melos6]
+        structure: [single, workspace, path_modules, melos6, melos6_local]
     steps:
       - uses: actions/checkout@v4
 

@@ -186,8 +186,8 @@ for this.
 
 `.github/workflows/e2e.yml` runs on every push to `main` and every pull
 request, on Flutter 3.44.8: `verify.sh <fixture> android dev` and `prod` for
-all four fixtures on Linux, `ios-cocoapods` and `ios-spm` for the other three
-on macOS, and the smoke test on Flutter 3.22.3. `verify.sh` runs on macOS and
+all five fixtures on Linux, `ios-cocoapods` and `ios-spm` for the three
+without melos on macOS, and the smoke test on Flutter 3.22.3. `verify.sh` runs on macOS and
 Linux alike.
 
 ## Fixture notes

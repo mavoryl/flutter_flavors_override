@@ -1,8 +1,8 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Adds the `dev` and `prod` flavors to the iOS project of a fixture app, the way
-# `flutter build ios --flavor <name>` expects them:
+# Adds the `dev` and `prod` flavors to the iOS or macOS project of a fixture
+# app, the way `flutter build ios|macos --flavor <name>` expects them:
 #
 # - build configurations Debug-<flavor>, Release-<flavor> and Profile-<flavor>,
 #   copies of Debug, Release and Profile in the project and in every target;
@@ -10,13 +10,14 @@
 #
 # `dev` gets a `.dev` bundle identifier suffix, like the Android `dev`
 # productFlavor gets `applicationIdSuffix = ".dev"`, so a build shows which
-# flavor it is.
+# flavor it is. iOS sets the bundle identifier in the Runner target, macOS in
+# Runner/Configs/AppInfo.xcconfig; there the suffix goes after `$(inherited)`.
 #
-# Usage: ruby e2e/tool/add_ios_flavors.rb <app>/ios/Runner.xcodeproj
+# Usage: ruby e2e/tool/add_xcode_flavors.rb <app>/<ios|macos>/Runner.xcodeproj
 #
 # Needs the `xcodeproj` gem (it ships with CocoaPods). Idempotent: existing
-# configurations and schemes are left as they are. Run once per fixture app;
-# the result is committed.
+# configurations and schemes are left as they are. Run once per fixture app
+# and platform; the result is committed.
 
 require 'fileutils'
 require 'xcodeproj'
@@ -24,7 +25,7 @@ require 'xcodeproj'
 FLAVORS = { 'dev' => '.dev', 'prod' => '' }.freeze
 MODES = %w[Debug Release Profile].freeze
 
-project_path = ARGV.fetch(0) { abort 'usage: add_ios_flavors.rb <app>/ios/Runner.xcodeproj' }
+project_path = ARGV.fetch(0) { abort 'usage: add_xcode_flavors.rb <app>/<ios|macos>/Runner.xcodeproj' }
 project = Xcodeproj::Project.open(project_path)
 runner = project.targets.find { |target| target.name == 'Runner' } or abort 'no Runner target'
 lists = [project.build_configuration_list] + project.targets.map(&:build_configuration_list)
@@ -41,7 +42,8 @@ FLAVORS.each do |flavor, bundle_id_suffix|
       copy.build_settings = Marshal.load(Marshal.dump(source.build_settings))
       copy.base_configuration_reference = source.base_configuration_reference
       if list.equal?(runner.build_configuration_list) && !bundle_id_suffix.empty?
-        copy.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] += bundle_id_suffix
+        bundle_id = copy.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] || '$(inherited)'
+        copy.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] = bundle_id + bundle_id_suffix
       end
       list.build_configurations << copy
     end

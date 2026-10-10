@@ -1,7 +1,8 @@
 name: ffo_probe
 description: >-
   Test plugin for the flutter_flavor_overrides e2e suite. Has native code on
-  Android and iOS, so its footprint in a build is easy to detect.
+  Android, iOS, macOS and Linux, so its footprint in a build is easy to
+  detect.
 version: 0.0.1
 publish_to: none
 
@@ -25,4 +26,8 @@ flutter:
         package: io.github.mavoryl.ffo_probe
         pluginClass: FfoProbePlugin
       ios:
+        pluginClass: FfoProbePlugin
+      macos:
+        pluginClass: FfoProbePlugin
+      linux:
         pluginClass: FfoProbePlugin

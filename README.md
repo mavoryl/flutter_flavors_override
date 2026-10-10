@@ -98,13 +98,33 @@ The tool does not generate stubs. A stub is a small package that:
 - degrades safely: return a neutral value or take the code path the plugin itself takes when the
   platform side is unavailable, rather than throwing.
 
-Keep the stub outside your pub workspace members and outside melos `packages:` globs — two
-packages with the same name in one resolution are not allowed.
+The stub is never a participant of its own: not a pub workspace member, not under melos
+`packages:` globs (list it under `ignore:` if a glob would catch it), not a `path:` dependency of
+anything. Only `flavor_overrides` points to it, so it joins the resolution only in the flavor that
+swaps it — and then it is resolved together with the rest of the project, no separate `pub get`
+needed. Run `pub get` inside the stub only to work on it as a package of its own (its tests,
+`dart analyze` in its directory).
+
+## What can be swapped
+
+An override replaces where a package name comes from; it does not add a second package. Whether
+that works depends on where the real package comes from:
+
+| The real package | Can it be swapped? |
+|---|---|
+| pub.dev or git (a regular plugin) | Yes. |
+| A local package reached through `path:`, no workspace | Yes. |
+| A local package that is a **pub workspace member** | **No.** pub refuses to override workspace members ("Cannot override workspace packages"); the tool stops with an error before writing anything. Take the package out of `workspace:` and depend on it through `path:` instead. |
+| A local package outside the workspace members, reached through `path:` | Yes. It then resolves on its own for its own tests and analysis. |
+| A melos 6 package, linked by melos (no workspace) | Yes, with the stub under `ignore:` in `melos.yaml`. The tool takes the entry over from melos, so the order of the tool and `melos bootstrap` does not matter; after switching back, `melos bootstrap` restores melos's link. |
 
 ## Run it
 
-Run the tool **before** `pub get` / `melos bootstrap`, with the same flavor you build. After
-switching flavors, run `pub get` (or `melos bootstrap`) again.
+Run the tool **before** `pub get` / `melos bootstrap`, with the same flavor you build, and
+**always run `pub get` (or `melos bootstrap`) after it** — also right before a build. `flutter
+build` does not notice a changed `pubspec_overrides.yaml`: while `pubspec.lock` is newer than
+`pubspec.yaml` it skips its own `pub get` and builds with the previous resolution, real plugin
+included.
 
 ```yaml
 # GitHub Actions example
@@ -148,7 +168,8 @@ what it wrote.
 The tool owns only the entries listed in its marker comment, `# flutter_flavor_overrides: a,b`.
 Everything else in the file — entries written by melos, your own entries, comments — is kept. If
 another entry already overrides a package the tool needs to override, it stops with an error
-naming the file. Whenever the tool writes entries, it also carries over your pubspec's own
+naming the file — except an entry melos manages, which the tool takes over (see
+[What can be swapped](#what-can-be-swapped)). Whenever the tool writes entries, it also carries over your pubspec's own
 `dependency_overrides` (pub ignores them once `pubspec_overrides.yaml` has a `dependency_overrides`
 section), except packages the file already overrides. When the tool removes its entries, the
 file returns to what it was before; a file left with nothing but what the tool wrote is deleted.

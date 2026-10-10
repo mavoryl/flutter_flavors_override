@@ -66,6 +66,28 @@ flavor_overrides:
   `dependency_overrides`. In a pub workspace, a member must not override the same package itself:
   pub refuses a package overridden in two places, so the tool stops with an error instead.
 
+Keys under `flavor_overrides` are just labels matched against `--flavor`; they don't have to
+match your Flutter flavors. To vary overrides by build mode too, use composite keys such as
+`prodRelease` and `prodDebug`, and run the tool with the one you build:
+
+```yaml
+flavor_overrides:
+  prodRelease:
+    some_plugin: {path: ../stubs/some_plugin}
+    network_inspector: {path: ../stubs/network_inspector}
+  prodDebug:
+    some_plugin: {path: ../stubs/some_plugin}
+```
+
+```console
+$ flutter_flavor_overrides --flavor prodRelease
+$ flutter pub get
+$ flutter build ipa --release --flavor prod
+```
+
+The tool runs before `pub get`, so build mode never reaches it: after switching modes or flavors
+locally, run it and `pub get` again.
+
 ## Write the stub
 
 The tool does not generate stubs. A stub is a small package that:
